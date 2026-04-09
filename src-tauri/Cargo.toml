@@ -1,0 +1,28 @@
+[package]
+name = "parking_os"
+version = "1.0.0"
+description = "Parking.OS — system zarządzania parkingiem"
+authors = ["Michał Kłos"]
+edition = "2021"
+
+[lib]
+name = "parking_os_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-fs = "2"
+tauri-plugin-store = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+bcrypt = "0.16"
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+base64 = "0.22"
+tokio = { version = "1", features = ["time"] }
+

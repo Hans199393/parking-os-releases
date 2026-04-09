@@ -1,0 +1,292 @@
+import { useEffect, useState } from 'react';
+import { Camera, CalendarDays, Bell, CloudSun } from 'lucide-react';
+import { getReservationsForDate, getExtraOpenDays } from '../../lib/supabase';
+import { Card, Spinner } from '../shared/UI';
+import { Page } from '../Sidebar/Sidebar';
+import RTSPPlayer from '../Cameras/RTSPPlayer';
+
+const LAT = 54.3404;
+const LON = 18.8865;
+
+interface WeatherInfo {
+  date: string;       // YYYY-MM-DD
+  label: string;      // "Dziś" / "pt 12.06"
+  emoji: string;
+  maxTemp: number;
+  description: string;
+}
+
+function weatherEmoji(code: number): string {
+  if (code === 0) return '☀️';
+  if (code <= 2) return '🌤️';
+  if (code === 3) return '☁️';
+  if (code <= 49) return '🌫️';
+  if (code <= 57) return '🌦️';
+  if (code <= 67) return '🌧️';
+  if (code <= 77) return '❄️';
+  if (code <= 82) return '🌧️';
+  if (code <= 86) return '🌨️';
+  return '⛈️';
+}
+
+function weatherDesc(code: number): string {
+  if (code === 0) return 'Bezchmurnie';
+  if (code <= 2) return 'Częściowe zachmurzenie';
+  if (code === 3) return 'Zachmurzenie';
+  if (code <= 49) return 'Mgła';
+  if (code <= 57) return 'Mżawka';
+  if (code <= 67) return 'Deszcz';
+  if (code <= 77) return 'Śnieg';
+  if (code <= 82) return 'Przelotny deszcz';
+  if (code <= 86) return 'Opady śniegu';
+  return 'Burza';
+}
+
+// Szuka najbliższego dnia otwartego parkingu (jutro wzwyż)
+// Standardowe: pt(5)/sb(6)/nd(0) w VI-VIII
+// Extra: lista dat z Supabase (format DD.MM.YYYY)
+function findNextOpenDay(extraDayDates: Set<string>): string | null {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() + 1); // od jutra
+  for (let i = 0; i < 120; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    const iso = d.toISOString().split('T')[0];
+    const [y, m, day] = iso.split('-');
+    const ddmmyyyy = `${day}.${m}.${y}`;
+    const month = d.getMonth() + 1;
+    const dow = d.getDay();
+    const isStandard = [6, 7, 8].includes(month) && [0, 5, 6].includes(dow);
+    if (isStandard || extraDayDates.has(ddmmyyyy)) return iso;
+  }
+  return null;
+}
+
+async function fetchWeatherForDates(dates: string[]): Promise<Record<string, { code: number; maxTemp: number }>> {
+  if (dates.length === 0) return {};
+  const sorted = [...dates].sort();
+  const startDate = sorted[0];
+  const endDate = sorted[sorted.length - 1];
+  const today = new Date().toISOString().split('T')[0];
+  let url: string;
+  if (endDate < today) {
+    url = `https://archive-api.open-meteo.com/v1/archive?latitude=${LAT}&longitude=${LON}&start_date=${startDate}&end_date=${endDate}&daily=weather_code,temperature_2m_max&timezone=Europe%2FWarsaw`;
+  } else {
+    const pastDays = Math.max(0, Math.floor((new Date().getTime() - new Date(startDate).getTime()) / 86400000) + 1);
+    const futureDays = Math.max(1, Math.floor((new Date(endDate).getTime() - new Date().getTime()) / 86400000) + 2);
+    url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}&daily=weather_code,temperature_2m_max&timezone=Europe%2FWarsaw&past_days=${Math.min(pastDays, 92)}&forecast_days=${Math.min(futureDays, 16)}`;
+  }
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return {};
+    const json = await res.json();
+    const result: Record<string, { code: number; maxTemp: number }> = {};
+    const times: string[] = json.daily?.time ?? [];
+    const codes: number[] = json.daily?.weather_code ?? [];
+    const temps: number[] = json.daily?.temperature_2m_max ?? [];
+    for (let i = 0; i < times.length; i++) {
+      if (dates.includes(times[i])) {
+        result[times[i]] = { code: codes[i], maxTemp: Math.round(temps[i]) };
+      }
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+interface DashboardProps {
+  onNavigate: (page: Page) => void;
+  newReservations: number;
+  cam1HlsUrl: string | null;
+  cam2HlsUrl: string | null;
+  cam3HlsUrl: string | null;
+  cam4HlsUrl: string | null;
+}
+
+export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam2HlsUrl, cam3HlsUrl, cam4HlsUrl }: DashboardProps) {
+  const today = new Date().toISOString().split('T')[0];
+  const [todayRes, setTodayRes] = useState<{ registration: string }[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [weatherWidgets, setWeatherWidgets] = useState<WeatherInfo[]>([]);
+  const [weatherLoading, setWeatherLoading] = useState(true);
+
+  const cameras = [
+    { label: 'CAM 1', url: cam1HlsUrl },
+    { label: 'CAM 2', url: cam2HlsUrl },
+    { label: 'CAM 3', url: cam3HlsUrl },
+    { label: 'CAM 4', url: cam4HlsUrl },
+  ];
+
+  useEffect(() => {
+    getReservationsForDate(today)
+      .then(setTodayRes)
+      .catch(() => setTodayRes([]))
+      .finally(() => setLoading(false));
+  }, [today, newReservations]);
+
+  useEffect(() => {
+    async function loadWeather() {
+      setWeatherLoading(true);
+      try {
+        // Zbierz extra dni z Supabase
+        const extraDays = await getExtraOpenDays().catch(() => []);
+        const extraSet = new Set(extraDays.filter(d => d.active).map(d => d.date));
+        const nextOpen = findNextOpenDay(extraSet);
+        const datesToFetch = [today, ...(nextOpen ? [nextOpen] : [])];
+        const weatherData = await fetchWeatherForDates(datesToFetch);
+
+        const widgets: WeatherInfo[] = [];
+
+        // Widget 1: Dziś
+        const todayW = weatherData[today];
+        if (todayW) {
+          widgets.push({
+            date: today,
+            label: 'Dziś',
+            emoji: weatherEmoji(todayW.code),
+            maxTemp: todayW.maxTemp,
+            description: weatherDesc(todayW.code),
+          });
+        }
+
+        // Widget 2: Najbliższy dzień otwarty
+        if (nextOpen && weatherData[nextOpen]) {
+          const w = weatherData[nextOpen];
+          const d = new Date(nextOpen + 'T12:00:00');
+          const dayName = d.toLocaleDateString('pl-PL', { weekday: 'short' });
+          const dayNum = d.toLocaleDateString('pl-PL', { day: 'numeric', month: 'numeric' });
+          widgets.push({
+            date: nextOpen,
+            label: `${dayName} ${dayNum}`,
+            emoji: weatherEmoji(w.code),
+            maxTemp: w.maxTemp,
+            description: weatherDesc(w.code),
+          });
+        }
+
+        setWeatherWidgets(widgets);
+      } catch {
+        setWeatherWidgets([]);
+      } finally {
+        setWeatherLoading(false);
+      }
+    }
+    loadWeather();
+  }, [today]);
+
+  const dateLabel = new Date().toLocaleDateString('pl-PL', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  });
+
+  return (
+    <div className="p-4 h-full flex flex-col overflow-hidden">
+      {/* Header row */}
+      <div className="flex items-center justify-between mb-3 flex-shrink-0">
+        <div>
+          <h1 className="text-xl font-bold text-[var(--color-text)]">Dashboard</h1>
+          <p className="text-[var(--color-text-muted)] text-xs capitalize">{dateLabel}</p>
+        </div>
+        {newReservations > 0 && (
+          <div
+            className="flex items-center gap-2 bg-teal-500/10 border border-teal-500/40 rounded-lg px-3 py-1.5 cursor-pointer hover:bg-teal-500/20 transition-colors"
+            onClick={() => onNavigate('reservations')}
+          >
+            <Bell size={14} className="text-teal-400" />
+            <span className="text-teal-300 font-semibold text-xs">
+              {newReservations} nowa rezerwacja{newReservations > 1 ? (newReservations < 5 ? 'e' : '') : ''}!
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Weather widgets */}
+      {(weatherLoading || weatherWidgets.length > 0) && (
+        <div className="flex gap-3 mb-3 flex-shrink-0">
+          {weatherLoading ? (
+            <div className="flex items-center gap-2 text-slate-500 text-xs"><Spinner size="sm" /> Ładowanie pogody…</div>
+          ) : (
+            weatherWidgets.map(w => (
+              <div key={w.date} className="flex items-center gap-3 bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2.5 min-w-[160px]">
+                <span className="text-3xl leading-none">{w.emoji}</span>
+                <div>
+                  <p className="text-xs text-slate-400 font-medium">{w.label}</p>
+                  <p className="text-xl font-bold text-white leading-tight">{w.maxTemp}°C</p>
+                  <p className="text-[11px] text-slate-500">{w.description}</p>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Main content — cameras left, reservations right */}
+      <div className="flex gap-4 flex-1 min-h-0">
+        {/* 4 cameras in 2×2 grid */}
+        <div className="flex flex-col gap-2 flex-1 min-h-0 min-w-0">
+          <div className="flex items-center justify-between flex-shrink-0">
+            <div className="flex items-center gap-1.5">
+              <Camera size={14} className="text-teal-400" />
+              <span className="font-semibold text-sm text-[var(--color-text)]">Kamery na żywo</span>
+            </div>
+            <button className="text-xs text-teal-400 hover:underline" onClick={() => onNavigate('cameras')}>
+              Pełny ekran →
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-2 flex-1 min-h-0">
+            {cameras.map((cam, i) => (
+              <div key={i} className="cursor-pointer min-h-0" style={{ aspectRatio: '16/9' }} onClick={() => onNavigate('cameras')}>
+                {cam.url ? (
+                  <div className="h-full rounded-xl overflow-hidden bg-black">
+                    <RTSPPlayer streamUrl={cam.url} label={cam.label} fill />
+                  </div>
+                ) : (
+                  <div className="h-full bg-slate-900 rounded-xl border border-slate-700 flex items-center justify-center">
+                    <div className="text-center">
+                      <Camera size={18} className="text-slate-600 mx-auto mb-1" />
+                      <p className="text-slate-500 text-xs">{cam.label} — brak</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Reservations — fixed width sidebar */}
+        <div className="w-72 flex-shrink-0 flex flex-col min-h-0 bg-[var(--color-card)] border border-[var(--color-border)] rounded-xl p-4">
+          <div className="flex items-center justify-between mb-3 flex-shrink-0">
+            <div className="flex items-center gap-1.5">
+              <CalendarDays size={14} className="text-teal-400" />
+              <span className="font-semibold text-sm text-[var(--color-text)]">Rezerwacje dziś</span>
+            </div>
+            <button className="text-xs text-teal-400 hover:underline" onClick={() => onNavigate('reservations')}>
+              Otwórz →
+            </button>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-auto">
+            {loading ? (
+              <div className="flex justify-center py-6"><Spinner /></div>
+            ) : todayRes.length === 0 ? (
+              <div className="py-6 text-center">
+                <p className="text-slate-400 text-sm">Brak rezerwacji na dziś</p>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <div className="text-2xl font-bold text-teal-400 mb-2">{todayRes.length}</div>
+                {todayRes.map((r, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-slate-900 rounded-lg px-2.5 py-1.5 border border-slate-700">
+                    <span className="text-xs text-slate-500 w-4">{i + 1}.</span>
+                    <span className="text-sm font-mono font-semibold text-white tracking-wider">{r.registration}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
