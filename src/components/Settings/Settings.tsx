@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { getStore } from '../../lib/store';
 import { resetSupabaseClient, testConnection } from '../../lib/supabase';
 import { changePassword as changeAuthPassword } from '../../lib/auth';
@@ -22,6 +23,12 @@ const SETTINGS_KEYS = [
   { key: 'supabase_key', label: 'Supabase Service Key', placeholder: 'eyJ...', group: 'supabase' },
   { key: 'admin_url', label: 'URL panelu CMS (strona administracyjna)', placeholder: 'https://twoja-domena.pl/zaplecze-mk', group: 'other' },
   { key: 'pwa_url', label: 'URL panelu iPad (PWA)', placeholder: 'http://localhost:3001', group: 'other' },
+  { key: 'email_imap_host', label: 'IMAP serwer', placeholder: 'np. poczta.ohv.pl', group: 'email' },
+  { key: 'email_imap_port', label: 'IMAP port', placeholder: '993', group: 'email' },
+  { key: 'email_smtp_host', label: 'SMTP serwer', placeholder: 'np. poczta.ohv.pl', group: 'email' },
+  { key: 'email_smtp_port', label: 'SMTP port', placeholder: '465', group: 'email' },
+  { key: 'email_user', label: 'Login (adres e-mail)', placeholder: 'kontakt@parkingsobieszewo.pl', group: 'email' },
+  { key: 'email_pass', label: 'Hasło', placeholder: '••••••••', group: 'email' },
 ];
 
 export default function Settings({
@@ -40,6 +47,9 @@ export default function Settings({
   // Test connection
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [testing, setTesting] = useState(false);
+
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [emailTestResult, setEmailTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
 
   // Password change
   const [oldPass, setOldPass] = useState('');
@@ -114,6 +124,24 @@ export default function Settings({
     }
   };
 
+  const handleTestImap = async () => {
+    setTestingEmail(true);
+    setEmailTestResult(null);
+    try {
+      await invoke('email_test_imap', {
+        imap_host: values['email_imap_host'] ?? '',
+        imap_port: parseInt(values['email_imap_port'] ?? '993') || 993,
+        user: values['email_user'] ?? '',
+        pass: values['email_pass'] ?? '',
+      });
+      setEmailTestResult({ ok: true });
+    } catch (e) {
+      setEmailTestResult({ ok: false, error: String(e) });
+    } finally {
+      setTestingEmail(false);
+    }
+  };
+
   return (
     <div className="p-6 overflow-y-auto h-full space-y-6">
       <div>
@@ -142,6 +170,35 @@ export default function Settings({
           {testResult && (
             <span className={`text-sm font-medium ${testResult.ok ? 'text-green-400' : 'text-red-400'}`}>
               {testResult.ok ? '✓ Połączenie OK' : `✗ ${testResult.error}`}
+            </span>
+          )}
+        </div>
+      </Card>
+
+      {/* Email */}
+      <Card title="Poczta e-mail (IMAP / SMTP — Zimbra)">
+        <div className="space-y-4">
+          {SETTINGS_KEYS.filter(s => s.group === 'email').map(({ key, label, placeholder }) => (
+            <Input
+              key={key}
+              label={label}
+              type={key === 'email_pass' ? 'password' : 'text'}
+              placeholder={placeholder}
+              value={values[key] ?? ''}
+              onChange={e => setValues(v => ({ ...v, [key]: e.target.value }))}
+            />
+          ))}
+        </div>
+        <p className="text-xs text-[var(--color-muted)] mt-3">
+          IMAP port: 993 (SSL) · SMTP port: 465 (SSL) · Serwer: sprawdź w pasku URL Zimbra webmail lub w dokumentacji ohv.pl
+        </p>
+        <div className="mt-4 flex items-center gap-3 flex-wrap">
+          <Button variant="secondary" onClick={handleTestImap} loading={testingEmail} size="sm">
+            {emailTestResult?.ok ? <Wifi size={14} /> : <WifiOff size={14} />} Testuj IMAP
+          </Button>
+          {emailTestResult && (
+            <span className={`text-sm font-medium ${emailTestResult.ok ? 'text-green-400' : 'text-red-400'}`}>
+              {emailTestResult.ok ? '✓ Połączenie OK' : `✗ ${emailTestResult.error}`}
             </span>
           )}
         </div>

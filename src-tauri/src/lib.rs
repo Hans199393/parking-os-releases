@@ -3,6 +3,145 @@ use tauri::AppHandle;
 use base64::Engine;
 use std::sync::{Arc, Mutex};
 use std::process::Child;
+use serde::Serialize;
+use mailparse::MailHeaderMap;
+
+// ─── Email types ─────────────────────────────────────────────────────────────
+#[derive(Serialize, Clone)]
+pub struct EmailMessage {
+    pub uid: u32,
+    pub subject: String,
+    pub from: String,
+    pub date: String,
+    pub is_read: bool,
+}
+
+// ─── IMAP helper ─────────────────────────────────────────────────────────────
+fn imap_session(
+    host: &str,
+    port: u16,
+    user: &str,
+    pass: &str,
+) -> Result<imap::Session<native_tls::TlsStream<std::net::TcpStream>>, String> {
+    let tls = native_tls::TlsConnector::new().map_err(|e| e.to_string())?;
+    let client = imap::connect((host, port), host, &tls).map_err(|e| e.to_string())?;
+    client.login(user, pass).map_err(|(e, _)| e.to_string())
+}
+
+fn find_part_body(mail: &mailparse::ParsedMail, mime: &str) -> Option<String> {
+    if mail.ctype.mimetype == mime {
+        return mail.get_body().ok();
+    }
+    for sub in &mail.subparts {
+        if let Some(body) = find_part_body(sub, mime) {
+            return Some(body);
+        }
+    }
+    None
+}
+
+// ─── Email commands ───────────────────────────────────────────────────────────
+#[tauri::command]
+async fn email_test_imap(imap_host: String, imap_port: u16, user: String, pass: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let mut session = imap_session(&imap_host, imap_port, &user, &pass)?;
+        session.logout().ok();
+        Ok(())
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn email_fetch_list(imap_host: String, imap_port: u16, user: String, pass: String) -> Result<Vec<EmailMessage>, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut session = imap_session(&imap_host, imap_port, &user, &pass)?;
+        let mailbox = session.select("INBOX").map_err(|e| e.to_string())?;
+        let total = mailbox.exists;
+        if total == 0 {
+            session.logout().ok();
+            return Ok(vec![]);
+        }
+        let range = if total > 50 { format!("{}:*", total - 49) } else { "1:*".to_string() };
+        let messages = session.fetch(&range, "UID FLAGS BODY.PEEK[HEADER]").map_err(|e| e.to_string())?;
+
+        let mut result: Vec<EmailMessage> = Vec::new();
+        for msg in messages.iter() {
+            let uid = msg.uid.unwrap_or(0);
+            let is_read = msg.flags().iter().any(|f| *f == imap::types::Flag::Seen);
+            let header_bytes = msg.header().unwrap_or(&[]);
+            let (headers, _) = mailparse::parse_headers(header_bytes).unwrap_or_default();
+            let subject = headers.get_first_value("Subject").unwrap_or_else(|| "(bez tematu)".into());
+            let from = headers.get_first_value("From").unwrap_or_else(|| "(nieznany)".into());
+            let date = headers.get_first_value("Date").unwrap_or_default();
+            result.push(EmailMessage { uid, subject, from, date, is_read });
+        }
+        result.sort_by(|a, b| b.uid.cmp(&a.uid));
+        session.logout().ok();
+        Ok(result)
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn email_fetch_body(imap_host: String, imap_port: u16, user: String, pass: String, uid: u32) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut session = imap_session(&imap_host, imap_port, &user, &pass)?;
+        session.select("INBOX").map_err(|e| e.to_string())?;
+        let messages = session.uid_fetch(uid.to_string(), "BODY[]").map_err(|e| e.to_string())?;
+        let raw = messages.iter().next().and_then(|m| m.body()).unwrap_or(&[]);
+        let parsed = mailparse::parse_mail(raw).map_err(|e| e.to_string())?;
+        // Mark as read
+        session.uid_store(uid.to_string(), "+FLAGS (\\Seen)").ok();
+        session.logout().ok();
+        if let Some(html) = find_part_body(&parsed, "text/html") {
+            return Ok(html);
+        }
+        let text = find_part_body(&parsed, "text/plain").unwrap_or_else(|| "(brak treści)".into());
+        let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        Ok(format!("<pre style='white-space:pre-wrap;font-family:sans-serif;font-size:14px;line-height:1.6'>{}</pre>", escaped))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn email_send(smtp_host: String, smtp_port: u16, user: String, pass: String, to: String, subject: String, body: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        use lettre::{Message, SmtpTransport, Transport};
+        use lettre::transport::smtp::authentication::Credentials;
+        use lettre::message::header::ContentType;
+        use lettre::message::Mailbox;
+
+        let from: Mailbox = user.parse().map_err(|_| "Nieprawidłowy adres nadawcy".to_string())?;
+        let to_mb: Mailbox = to.parse().map_err(|_| "Nieprawidłowy adres odbiorcy".to_string())?;
+        let email = Message::builder()
+            .from(from)
+            .to(to_mb)
+            .subject(subject)
+            .header(ContentType::TEXT_PLAIN)
+            .body(body)
+            .map_err(|e| e.to_string())?;
+        let creds = Credentials::new(user, pass);
+        let mailer = SmtpTransport::relay(&smtp_host)
+            .map_err(|e| e.to_string())?
+            .port(smtp_port)
+            .credentials(creds)
+            .build();
+        mailer.send(&email).map_err(|e| e.to_string())?;
+        Ok(())
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn email_delete(imap_host: String, imap_port: u16, user: String, pass: String, uid: u32) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        let mut session = imap_session(&imap_host, imap_port, &user, &pass)?;
+        session.select("INBOX").map_err(|e| e.to_string())?;
+        let uid_str = uid.to_string();
+        session.uid_store(&uid_str, "+FLAGS (\\Deleted)").map_err(|e| e.to_string())?;
+        session.expunge().map_err(|e| e.to_string())?;
+        session.logout().ok();
+        Ok(())
+    }).await.map_err(|e| e.to_string())?
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 // ─── PWA server process management ──────────────────────────────────────────
 pub struct PwaServer(pub Arc<Mutex<Option<Child>>>);
@@ -128,7 +267,12 @@ pub fn run() {
             send_notification,
             fetch_snapshot,
             spawn_pwa,
-            stop_pwa
+            stop_pwa,
+            email_test_imap,
+            email_fetch_list,
+            email_fetch_body,
+            email_send,
+            email_delete,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
