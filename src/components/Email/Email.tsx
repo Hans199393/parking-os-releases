@@ -30,21 +30,7 @@ interface Compose {
 const SIG_SEPARATOR = '\n\n---\n';
 const REPLY_SIGNATURE = `${SIG_SEPARATOR}Michał Kłos | Parking płatny niestrzeżony\nkontakt@parkingsobieszewo.pl | tel. 784 828 748`;
 
-const LOGO_FALLBACK = 'https://hans199393.github.io/parking-michal-klos/assets/images/logo2026.png';
-
-async function loadLogoBase64(): Promise<string> {
-  try {
-    const resp = await fetch('/logo2026.png');
-    const blob = await resp.blob();
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result as string);
-      reader.readAsDataURL(blob);
-    });
-  } catch {
-    return LOGO_FALLBACK;
-  }
-}
+const LOGO_URL = 'https://hans199393.github.io/parking-michal-klos/assets/images/logo2026.png';
 
 function buildHtmlSignature(logoSrc: string): string {
   return `
@@ -63,7 +49,7 @@ function buildHtmlSignature(logoSrc: string): string {
 </table>`;
 }
 
-function buildHtmlEmail(body: string, logoSrc: string): string {
+function buildHtmlEmail(body: string): string {
   const sepIdx = body.indexOf(SIG_SEPARATOR);
   const userText = sepIdx >= 0 ? body.slice(0, sepIdx) : body;
   const escaped = userText
@@ -71,7 +57,7 @@ function buildHtmlEmail(body: string, logoSrc: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
-  return `<!DOCTYPE html><html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;line-height:1.6;max-width:600px">${escaped}${buildHtmlSignature(logoSrc)}</body></html>`;
+  return `<!DOCTYPE html><html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;line-height:1.6;max-width:600px">${escaped}${buildHtmlSignature(LOGO_URL)}</body></html>`;
 }
 
 export default function Email() {
@@ -88,11 +74,6 @@ export default function Email() {
   const [sendError, setSendError] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [logoBase64, setLogoBase64] = useState<string>(LOGO_FALLBACK);
-
-  useEffect(() => {
-    loadLogoBase64().then(setLogoBase64);
-  }, []);
 
   const loadConfig = useCallback(async (): Promise<EmailConfig | null> => {
     const store = await getStore();
@@ -182,7 +163,7 @@ export default function Email() {
         pass: config.pass,
         to: compose.to.trim(),
         subject: compose.subject.trim(),
-        body: buildHtmlEmail(compose.body, logoBase64),
+        body: buildHtmlEmail(compose.body),
       });
       setCompose(null);
     } catch (e) {
