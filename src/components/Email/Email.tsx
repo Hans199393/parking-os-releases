@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Mail, RefreshCw, Send, Trash2, Reply, Pencil, X, AlertCircle } from 'lucide-react';
+import { Mail, RefreshCw, Send, Trash2, Reply, Pencil, X, AlertCircle, SendHorizonal } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { getStore } from '../../lib/store';
 import { Spinner } from '../shared/UI';
@@ -59,7 +59,9 @@ function buildHtmlEmail(body: string): string {
 export default function Email() {
   const [config, setConfig] = useState<EmailConfig | null>(null);
   const [configMissing, setConfigMissing] = useState(false);
+  const [folder, setFolder] = useState<'inbox' | 'sent'>('inbox');
   const [emails, setEmails] = useState<EmailMessage[]>([]);
+  const [sentEmails, setSentEmails] = useState<EmailMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<EmailMessage | null>(null);
@@ -91,13 +93,22 @@ export default function Email() {
       if (!cfg) { setConfigMissing(true); setLoading(false); return; }
       setConfig(cfg);
       setConfigMissing(false);
-      const list = await invoke<EmailMessage[]>('email_fetch_list', {
-        imapHost: cfg.imap_host,
-        imapPort: cfg.imap_port,
-        user: cfg.user,
-        pass: cfg.pass,
-      });
-      setEmails(list);
+      const [inbox, sent] = await Promise.all([
+        invoke<EmailMessage[]>('email_fetch_list', {
+          imapHost: cfg.imap_host,
+          imapPort: cfg.imap_port,
+          user: cfg.user,
+          pass: cfg.pass,
+        }),
+        invoke<EmailMessage[]>('email_fetch_sent', {
+          imapHost: cfg.imap_host,
+          imapPort: cfg.imap_port,
+          user: cfg.user,
+          pass: cfg.pass,
+        }).catch(() => [] as EmailMessage[]),
+      ]);
+      setEmails(inbox);
+      setSentEmails(sent);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -107,13 +118,14 @@ export default function Email() {
 
   useEffect(() => { loadEmails(); }, [loadEmails]);
 
-  const openEmail = async (email: EmailMessage) => {
+  const openEmail = async (email: EmailMessage, isSent = false) => {
     setSelected(email);
     setBody(null);
     setBodyLoading(true);
     try {
       const cfg = config ?? await loadConfig();
       if (!cfg) return;
+      // For sent folder, fetch body without marking as read
       const html = await invoke<string>('email_fetch_body', {
         imapHost: cfg.imap_host,
         imapPort: cfg.imap_port,
@@ -122,8 +134,7 @@ export default function Email() {
         uid: email.uid,
       });
       setBody(html);
-      // Mark as read locally
-      setEmails(prev => prev.map(e => e.uid === email.uid ? { ...e, is_read: true } : e));
+      if (!isSent) setEmails(prev => prev.map(e => e.uid === email.uid ? { ...e, is_read: true } : e));
     } catch (e) {
       setBody(`<p style="color:red">Błąd ładowania: ${String(e)}</p>`);
     } finally {
@@ -153,6 +164,8 @@ export default function Email() {
     setSendError('');
     try {
       await invoke('email_send', {
+        imapHost: config.imap_host,
+        imapPort: config.imap_port,
         smtpHost: config.smtp_host || config.imap_host,
         smtpPort: config.smtp_port,
         user: config.user,
@@ -162,6 +175,13 @@ export default function Email() {
         body: buildHtmlEmail(compose.body),
       });
       setCompose(null);
+      // Refresh sent folder in background
+      invoke<EmailMessage[]>('email_fetch_sent', {
+        imapHost: config.imap_host,
+        imapPort: config.imap_port,
+        user: config.user,
+        pass: config.pass,
+      }).then(setSentEmails).catch(() => {});
     } catch (e) {
       setSendError(String(e));
     } finally {
@@ -224,9 +244,10 @@ export default function Email() {
 
       {/* ── Email list panel ── */}
       <div className="w-80 flex-shrink-0 border-r border-[var(--color-border)] flex flex-col bg-[var(--color-bg)]">
+        {/* Header */}
         <div className="px-4 py-3 border-b border-[var(--color-border)] flex items-center justify-between">
           <h2 className="font-bold text-[var(--color-text)] flex items-center gap-2">
-            <Mail size={17} /> Skrzynka odbiorcza
+            <Mail size={17} /> Poczta
             {emails.filter(e => !e.is_read).length > 0 && (
               <span className="bg-teal-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5">
                 {emails.filter(e => !e.is_read).length}
@@ -234,21 +255,29 @@ export default function Email() {
             )}
           </h2>
           <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => openCompose()}
-              title="Nowa wiadomość"
-              className="p-1.5 rounded-md text-amber-400 hover:bg-amber-400/10 transition"
-            >
+            <button onClick={() => openCompose()} title="Nowa wiadomość" className="p-1.5 rounded-md text-amber-400 hover:bg-amber-400/10 transition">
               <Pencil size={15} />
             </button>
-            <button
-              onClick={loadEmails}
-              title="Odśwież"
-              className="p-1.5 rounded-md text-[var(--color-muted)] hover:text-[var(--color-text)] transition"
-            >
+            <button onClick={loadEmails} title="Odśwież" className="p-1.5 rounded-md text-[var(--color-muted)] hover:text-[var(--color-text)] transition">
               <RefreshCw size={15} />
             </button>
           </div>
+        </div>
+
+        {/* Folder tabs */}
+        <div className="flex border-b border-[var(--color-border)]">
+          <button
+            onClick={() => { setFolder('inbox'); setSelected(null); setBody(null); }}
+            className={`flex-1 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 transition ${folder === 'inbox' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'}`}
+          >
+            <Mail size={13} /> Odebrane
+          </button>
+          <button
+            onClick={() => { setFolder('sent'); setSelected(null); setBody(null); }}
+            className={`flex-1 py-2 text-xs font-semibold flex items-center justify-center gap-1.5 transition ${folder === 'sent' ? 'text-teal-400 border-b-2 border-teal-400' : 'text-[var(--color-muted)] hover:text-[var(--color-text)]'}`}
+          >
+            <SendHorizonal size={13} /> Wysłane
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -260,18 +289,18 @@ export default function Email() {
               {error}
               <button onClick={loadEmails} className="block mx-auto mt-2 text-xs text-teal-400 hover:underline">Spróbuj ponownie</button>
             </div>
-          ) : emails.length === 0 ? (
-            <div className="p-6 text-center text-[var(--color-muted)] text-sm">Skrzynka pusta ✉️</div>
+          ) : (folder === 'inbox' ? emails : sentEmails).length === 0 ? (
+            <div className="p-6 text-center text-[var(--color-muted)] text-sm">{folder === 'inbox' ? 'Skrzynka pusta ✉️' : 'Brak wysłanych ✉️'}</div>
           ) : (
-            emails.map(email => (
+            (folder === 'inbox' ? emails : sentEmails).map(email => (
               <button
                 key={email.uid}
-                onClick={() => openEmail(email)}
+                onClick={() => openEmail(email, folder === 'sent')}
                 className={`w-full text-left px-4 py-3 border-b border-[var(--color-border)] hover:bg-[var(--color-surface)] transition ${selected?.uid === email.uid ? 'bg-[var(--color-surface)]' : ''}`}
               >
                 <div className="flex items-start justify-between gap-2 mb-0.5">
-                  <span className={`text-sm truncate flex items-center gap-1.5 ${email.is_read ? 'text-[var(--color-muted)]' : 'text-[var(--color-text)] font-semibold'}`}>
-                    {!email.is_read && <span className="w-2 h-2 bg-teal-400 rounded-full flex-shrink-0" />}
+                  <span className={`text-sm truncate flex items-center gap-1.5 ${email.is_read || folder === 'sent' ? 'text-[var(--color-muted)]' : 'text-[var(--color-text)] font-semibold'}`}>
+                    {!email.is_read && folder === 'inbox' && <span className="w-2 h-2 bg-teal-400 rounded-full flex-shrink-0" />}
                     {extractDisplayName(email.from)}
                   </span>
                   <span className="text-[10px] text-[var(--color-muted)] flex-shrink-0">{fmtDate(email.date)}</span>

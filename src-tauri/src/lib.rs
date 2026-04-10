@@ -114,7 +114,7 @@ async fn email_fetch_body(imap_host: String, imap_port: u16, user: String, pass:
 }
 
 #[tauri::command]
-async fn email_send(smtp_host: String, smtp_port: u16, user: String, pass: String, to: String, subject: String, body: String) -> Result<(), String> {
+async fn email_send(imap_host: String, imap_port: u16, smtp_host: String, smtp_port: u16, user: String, pass: String, to: String, subject: String, body: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         use lettre::{Message, SmtpTransport, Transport};
         use lettre::transport::smtp::authentication::Credentials;
@@ -144,7 +144,11 @@ async fn email_send(smtp_host: String, smtp_port: u16, user: String, pass: Strin
                     .singlepart(logo_part),
             )
             .map_err(|e| e.to_string())?;
-        let creds = Credentials::new(user.clone(), pass);
+
+        // Build raw bytes for IMAP APPEND (Sent folder)
+        let raw_email = email.formatted();
+
+        let creds = Credentials::new(user.clone(), pass.clone());
         let mailer = if smtp_port == 465 {
             SmtpTransport::relay(&smtp_host)
                 .map_err(|e| e.to_string())?
@@ -152,7 +156,6 @@ async fn email_send(smtp_host: String, smtp_port: u16, user: String, pass: Strin
                 .credentials(creds)
                 .build()
         } else {
-            // 587 STARTTLS
             SmtpTransport::starttls_relay(&smtp_host)
                 .map_err(|e| e.to_string())?
                 .port(smtp_port)
@@ -160,7 +163,69 @@ async fn email_send(smtp_host: String, smtp_port: u16, user: String, pass: Strin
                 .build()
         };
         mailer.send(&email).map_err(|e| e.to_string())?;
+
+        // Save to Sent folder via IMAP APPEND
+        let mut session = imap_session(&imap_host, imap_port, &user, &pass)?;
+        // Find the Sent folder name (OVH uses "Sent" or "Sent Messages")
+        let sent_folder = {
+            let names: Vec<String> = match session.list(None, Some("*")) {
+                Ok(folders) => folders.iter().map(|n| n.name().to_string()).collect(),
+                Err(_) => vec![],
+            };
+            names.iter()
+                .find(|n| {
+                    let l = n.to_lowercase();
+                    l == "sent" || l == "sent messages" || l == "sent items" || l.contains("sent")
+                })
+                .cloned()
+                .unwrap_or_else(|| "Sent".to_string())
+        };
+        session.append(&sent_folder, &raw_email).map_err(|e| e.to_string())?;
+        session.logout().ok();
         Ok(())
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn email_fetch_sent(imap_host: String, imap_port: u16, user: String, pass: String) -> Result<Vec<EmailMessage>, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut session = imap_session(&imap_host, imap_port, &user, &pass)?;
+        // Try common Sent folder names
+        let sent_folder = {
+            let names: Vec<String> = match session.list(None, Some("*")) {
+                Ok(folders) => folders.iter().map(|n| n.name().to_string()).collect(),
+                Err(_) => vec![],
+            };
+            names.iter()
+                .find(|n| {
+                    let l = n.to_lowercase();
+                    l == "sent" || l == "sent messages" || l == "sent items" || l.contains("sent")
+                })
+                .cloned()
+                .unwrap_or_else(|| "Sent".to_string())
+        };
+        let mailbox = session.select(&sent_folder).map_err(|e| e.to_string())?;
+        let total = mailbox.exists;
+        if total == 0 {
+            session.logout().ok();
+            return Ok(vec![]);
+        }
+        let range = if total > 50 { format!("{}:*", total.saturating_sub(49)) } else { "1:*".to_string() };
+        let messages = session.fetch(&range, "(UID FLAGS BODY.PEEK[HEADER])").map_err(|e| e.to_string())?;
+        let mut result: Vec<EmailMessage> = Vec::new();
+        for msg in messages.iter() {
+            let uid = msg.uid.unwrap_or(0);
+            let is_read = msg.flags().iter().any(|f| *f == imap::types::Flag::Seen);
+            let header_bytes = msg.header().unwrap_or(&[]);
+            let (headers, _) = mailparse::parse_headers(header_bytes).unwrap_or_default();
+            let subject = headers.get_first_value("Subject").unwrap_or_else(|| "(bez tematu)".into());
+            let from = headers.get_first_value("To").unwrap_or_else(|| "(nieznany)".into());
+            let date = headers.get_first_value("Date").unwrap_or_default();
+            result.push(EmailMessage { uid, subject, from, date, is_read });
+        }
+        result.sort_by(|a, b| b.uid.cmp(&a.uid));
+        session.logout().ok();
+        Ok(result)
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -307,6 +372,7 @@ pub fn run() {
             get_logo_base64,
             email_test_imap,
             email_fetch_list,
+            email_fetch_sent,
             email_fetch_body,
             email_send,
             email_delete,
