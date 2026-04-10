@@ -9,6 +9,7 @@ import Finances from './components/Finances/Finances';
 import AdminPanel from './components/AdminPanel/AdminPanel';
 import Settings from './components/Settings/Settings';
 import Chat from './components/Chat/Chat';
+import Email from './components/Email/Email';
 import { startPolling, stopPolling } from './lib/notifications';
 import { scheduleDailyBackup } from './lib/backup';
 import { getStore } from './lib/store';
@@ -201,6 +202,9 @@ export default function App() {
         )}
         {page === 'chat' && (
           <Chat />
+        )}
+        {page === 'email' && (
+          <Email />
         )}
         {page === 'settings' && (
           <Settings theme={theme} onThemeChange={handleThemeChange} onSettingsSaved={loadCameraUrls} />

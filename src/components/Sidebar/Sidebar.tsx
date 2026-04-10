@@ -1,6 +1,6 @@
-import { LayoutDashboard, Camera, CalendarDays, DollarSign, Globe, Settings, Smartphone, MessageCircle } from 'lucide-react';
+import { LayoutDashboard, Camera, CalendarDays, DollarSign, Globe, Settings, Smartphone, MessageCircle, Mail } from 'lucide-react';
 
-export type Page = 'dashboard' | 'cameras' | 'reservations' | 'finances' | 'admin' | 'chat' | 'settings';
+export type Page = 'dashboard' | 'cameras' | 'reservations' | 'finances' | 'admin' | 'chat' | 'email' | 'settings';
 
 const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
@@ -9,6 +9,7 @@ const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: 'finances', label: 'Finanse', icon: <DollarSign size={20} /> },
   { id: 'admin', label: 'Panel WWW', icon: <Globe size={20} /> },
   { id: 'chat', label: 'Czat Orzeł', icon: <MessageCircle size={20} /> },
+  { id: 'email', label: 'Skrzynka', icon: <Mail size={20} /> },
   { id: 'settings', label: 'Ustawienia', icon: <Settings size={20} /> },
 ];
 
