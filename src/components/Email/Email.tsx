@@ -334,7 +334,7 @@ export default function Email() {
                     <span className="font-medium">Od:</span> {selected.from}
                   </div>
                   <div className="text-xs text-[var(--color-muted)]">
-                    <span className="font-medium">Data:</span> {selected.date}
+                    <span className="font-medium">Data:</span> {fmtDate(selected.date)}
                   </div>
                 </div>
                 <div className="flex gap-1.5 flex-shrink-0">
