@@ -23,9 +23,14 @@ fn imap_session(
     user: &str,
     pass: &str,
 ) -> Result<imap::Session<native_tls::TlsStream<std::net::TcpStream>>, String> {
-    let tls = native_tls::TlsConnector::new().map_err(|e| e.to_string())?;
-    let client = imap::connect((host, port), host, &tls).map_err(|e| e.to_string())?;
-    client.login(user, pass).map_err(|(e, _)| e.to_string())
+    let tls = native_tls::TlsConnector::builder()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let client = imap::connect((host, port), host, &tls)
+        .map_err(|e: imap::Error| e.to_string())?;
+    client.login(user, pass)
+        .map_err(|(e, _): (imap::Error, _)| e.to_string())
 }
 
 fn find_part_body(mail: &mailparse::ParsedMail, mime: &str) -> Option<String> {
