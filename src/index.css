@@ -16,17 +16,17 @@
 }
 
 .dark {
-  --color-bg: rgba(15, 23, 42, 0.82);
-  --color-sidebar: rgba(2, 6, 23, 0.97);
-  --color-surface: rgba(30, 41, 59, 0.90);
-  --color-border: #334155;
+  --color-bg: rgba(15, 23, 42, 0.68);
+  --color-sidebar: rgba(2, 6, 23, 0.88);
+  --color-surface: rgba(30, 41, 59, 0.72);
+  --color-border: rgba(51, 65, 85, 0.7);
   --color-text: #f1f5f9;
   --color-text-muted: #94a3b8;
   --color-muted: #94a3b8;
 }
 
 .dark body {
-  background-image: linear-gradient(rgba(15, 23, 42, 0.55), rgba(15, 23, 42, 0.55)), url('/bg.jpg');
+  background-image: linear-gradient(rgba(15, 23, 42, 0.38), rgba(15, 23, 42, 0.38)), url('/bg.jpg');
   background-size: cover;
   background-position: center;
   background-attachment: fixed;

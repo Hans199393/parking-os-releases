@@ -80,7 +80,7 @@ interface CardProps {
 
 export function Card({ children, className = '', title }: CardProps) {
   return (
-    <div className={`bg-[var(--color-surface)] border border-[var(--color-border)] rounded-xl p-5 ${className}`}>
+    <div className={`bg-[var(--color-surface)] backdrop-blur-sm border border-[var(--color-border)] rounded-xl p-5 ${className}`}>
       {title && <h3 className="text-base font-semibold text-[var(--color-text)] mb-4">{title}</h3>}
       {children}
     </div>

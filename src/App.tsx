@@ -164,7 +164,7 @@ export default function App() {
         onStopPwa={handleStopPwa}
         pwaStatus={pwaStatus}
       />
-      <main className="flex-1 overflow-hidden relative">
+      <main className="flex-1 overflow-hidden relative backdrop-blur-md bg-[var(--color-bg)]">
         {page === 'dashboard' && (
           <Dashboard
             onNavigate={handleNavigate}

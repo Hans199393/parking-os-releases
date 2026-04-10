@@ -24,7 +24,7 @@ interface SidebarProps {
 
 export default function Sidebar({ current, onChange, reservationBadge, onOpenPwa, onStopPwa, pwaStatus }: SidebarProps) {
   return (
-    <aside className="w-56 flex-shrink-0 bg-slate-900 border-r border-slate-700 flex flex-col h-screen">
+    <aside className="w-56 flex-shrink-0 bg-slate-900/85 backdrop-blur-md border-r border-slate-700/60 flex flex-col h-screen">
       {/* App title */}
       <div className="flex items-center gap-3 px-5 py-4 border-b border-slate-700">
         <img src="/logo2026.png" alt="Logo" className="h-9 w-auto object-contain" />
