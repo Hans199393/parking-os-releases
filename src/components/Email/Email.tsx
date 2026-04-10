@@ -65,8 +65,8 @@ export default function Email() {
       setConfig(cfg);
       setConfigMissing(false);
       const list = await invoke<EmailMessage[]>('email_fetch_list', {
-        imap_host: cfg.imap_host,
-        imap_port: cfg.imap_port,
+        imapHost: cfg.imap_host,
+        imapPort: cfg.imap_port,
         user: cfg.user,
         pass: cfg.pass,
       });
@@ -88,8 +88,8 @@ export default function Email() {
       const cfg = config ?? await loadConfig();
       if (!cfg) return;
       const html = await invoke<string>('email_fetch_body', {
-        imap_host: cfg.imap_host,
-        imap_port: cfg.imap_port,
+        imapHost: cfg.imap_host,
+        imapPort: cfg.imap_port,
         user: cfg.user,
         pass: cfg.pass,
         uid: email.uid,
@@ -126,8 +126,8 @@ export default function Email() {
     setSendError('');
     try {
       await invoke('email_send', {
-        smtp_host: config.smtp_host || config.imap_host,
-        smtp_port: config.smtp_port,
+        smtpHost: config.smtp_host || config.imap_host,
+        smtpPort: config.smtp_port,
         user: config.user,
         pass: config.pass,
         to: compose.to.trim(),
@@ -147,8 +147,8 @@ export default function Email() {
     setDeleting(true);
     try {
       await invoke('email_delete', {
-        imap_host: config.imap_host,
-        imap_port: config.imap_port,
+        imapHost: config.imap_host,
+        imapPort: config.imap_port,
         user: config.user,
         pass: config.pass,
         uid: deleteConfirm,

@@ -129,8 +129,8 @@ export default function Settings({
     setEmailTestResult(null);
     try {
       await invoke('email_test_imap', {
-        imap_host: values['email_imap_host'] ?? '',
-        imap_port: parseInt(values['email_imap_port'] ?? '993') || 993,
+        imapHost: values['email_imap_host'] ?? '',
+        imapPort: parseInt(values['email_imap_port'] ?? '993') || 993,
         user: values['email_user'] ?? '',
         pass: values['email_pass'] ?? '',
       });

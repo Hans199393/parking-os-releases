@@ -122,12 +122,21 @@ async fn email_send(smtp_host: String, smtp_port: u16, user: String, pass: Strin
             .header(ContentType::TEXT_PLAIN)
             .body(body)
             .map_err(|e| e.to_string())?;
-        let creds = Credentials::new(user, pass);
-        let mailer = SmtpTransport::relay(&smtp_host)
-            .map_err(|e| e.to_string())?
-            .port(smtp_port)
-            .credentials(creds)
-            .build();
+        let creds = Credentials::new(user.clone(), pass);
+        let mailer = if smtp_port == 465 {
+            SmtpTransport::relay(&smtp_host)
+                .map_err(|e| e.to_string())?
+                .port(smtp_port)
+                .credentials(creds)
+                .build()
+        } else {
+            // 587 STARTTLS
+            SmtpTransport::starttls_relay(&smtp_host)
+                .map_err(|e| e.to_string())?
+                .port(smtp_port)
+                .credentials(creds)
+                .build()
+        };
         mailer.send(&email).map_err(|e| e.to_string())?;
         Ok(())
     }).await.map_err(|e| e.to_string())?
