@@ -27,7 +27,36 @@ interface Compose {
   body: string;
 }
 
-const REPLY_SIGNATURE = '\n\n---\nMichał Kłos | Parking płatny niestrzeżony\nkontakt@parkingsobieszewo.pl | tel. 784 828 748';
+const SIG_SEPARATOR = '\n\n---\n';
+const REPLY_SIGNATURE = `${SIG_SEPARATOR}Michał Kłos | Parking płatny niestrzeżony\nkontakt@parkingsobieszewo.pl | tel. 784 828 748`;
+
+const LOGO_URL = 'https://hans199393.github.io/parking-michal-klos/assets/images/logo2026.png';
+
+const HTML_SIGNATURE = `
+<table style="border-top:2px solid #e2e8f0;padding-top:14px;margin-top:18px;border-collapse:collapse">
+  <tr>
+    <td style="padding-right:14px;vertical-align:middle">
+      <img src="${LOGO_URL}" width="64" height="64" alt="Logo" style="display:block">
+    </td>
+    <td style="vertical-align:middle;font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#374151;line-height:1.6">
+      <strong style="font-size:14px;color:#1a2d4a">Michał Kłos</strong><br>
+      Parking płatny niestrzeżony<br>
+      <a href="mailto:kontakt@parkingsobieszewo.pl" style="color:#4dbfbf;text-decoration:none">kontakt@parkingsobieszewo.pl</a>&nbsp;&nbsp;·&nbsp;&nbsp;tel. <a href="tel:+48784828748" style="color:#4dbfbf;text-decoration:none">784&nbsp;828&nbsp;748</a><br>
+      <span style="font-size:11px;color:#9ca3af">ul. Turystyczna 69, Wyspa Sobieszewska, Gdańsk</span>
+    </td>
+  </tr>
+</table>`;
+
+function buildHtmlEmail(body: string): string {
+  const sepIdx = body.indexOf(SIG_SEPARATOR);
+  const userText = sepIdx >= 0 ? body.slice(0, sepIdx) : body;
+  const escaped = userText
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n/g, '<br>');
+  return `<!DOCTYPE html><html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;line-height:1.6;max-width:600px">${escaped}${HTML_SIGNATURE}</body></html>`;
+}
 
 export default function Email() {
   const [config, setConfig] = useState<EmailConfig | null>(null);
@@ -132,7 +161,7 @@ export default function Email() {
         pass: config.pass,
         to: compose.to.trim(),
         subject: compose.subject.trim(),
-        body: compose.body,
+        body: buildHtmlEmail(compose.body),
       });
       setCompose(null);
     } catch (e) {

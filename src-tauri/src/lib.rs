@@ -119,7 +119,7 @@ async fn email_send(smtp_host: String, smtp_port: u16, user: String, pass: Strin
             .from(from)
             .to(to_mb)
             .subject(subject)
-            .header(ContentType::TEXT_PLAIN)
+            .header(ContentType::TEXT_HTML)
             .body(body)
             .map_err(|e| e.to_string())?;
         let creds = Credentials::new(user.clone(), pass);
