@@ -8,6 +8,7 @@
   --color-border: #e2e8f0;
   --color-text: #0f172a;
   --color-text-muted: #64748b;
+  --color-muted: #64748b;
   --color-accent: #4dbfbf;
   --color-accent-dark: #1a2d4a;
   --color-orange: #e8622a;
@@ -15,12 +16,20 @@
 }
 
 .dark {
-  --color-bg: #0f172a;
-  --color-sidebar: #020617;
-  --color-surface: #1e293b;
+  --color-bg: rgba(15, 23, 42, 0.82);
+  --color-sidebar: rgba(2, 6, 23, 0.97);
+  --color-surface: rgba(30, 41, 59, 0.90);
   --color-border: #334155;
   --color-text: #f1f5f9;
   --color-text-muted: #94a3b8;
+  --color-muted: #94a3b8;
+}
+
+.dark body {
+  background-image: linear-gradient(rgba(15, 23, 42, 0.55), rgba(15, 23, 42, 0.55)), url('/bg.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
 }
 
 * {

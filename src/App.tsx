@@ -155,7 +155,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[var(--color-bg)]">
+    <div className="flex h-screen overflow-hidden">
       <Sidebar
         current={page}
         onChange={handleNavigate}
