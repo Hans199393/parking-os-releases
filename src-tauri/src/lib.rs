@@ -119,16 +119,30 @@ async fn email_send(smtp_host: String, smtp_port: u16, user: String, pass: Strin
         use lettre::{Message, SmtpTransport, Transport};
         use lettre::transport::smtp::authentication::Credentials;
         use lettre::message::header::ContentType;
-        use lettre::message::Mailbox;
+        use lettre::message::{Mailbox, MultiPart, SinglePart, Attachment};
 
         let from: Mailbox = user.parse().map_err(|_| "Nieprawidłowy adres nadawcy".to_string())?;
         let to_mb: Mailbox = to.parse().map_err(|_| "Nieprawidłowy adres odbiorcy".to_string())?;
+
+        // HTML body referencing inline logo via CID
+        let html_part = SinglePart::builder()
+            .header(ContentType::TEXT_HTML)
+            .body(body);
+
+        // Inline logo attachment (CID = logo@parking)
+        let logo_bytes = include_bytes!("../../public/logo2026.png").to_vec();
+        let logo_part = Attachment::new_inline(String::from("logo@parking"))
+            .body(logo_bytes, ContentType::parse("image/png").unwrap());
+
         let email = Message::builder()
             .from(from)
             .to(to_mb)
             .subject(subject)
-            .header(ContentType::TEXT_HTML)
-            .body(body)
+            .multipart(
+                MultiPart::related()
+                    .singlepart(html_part)
+                    .singlepart(logo_part),
+            )
             .map_err(|e| e.to_string())?;
         let creds = Credentials::new(user.clone(), pass);
         let mailer = if smtp_port == 465 {
