@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getStore } from '../../lib/store';
-import { resetSupabaseClient, testConnection } from '../../lib/supabase';
+import { resetSupabaseClient } from '../../lib/supabase';
 import { changePassword as changeAuthPassword } from '../../lib/auth';
 import { Button, Input, Card } from '../shared/UI';
 import { Check, Eye, EyeOff, Wifi, WifiOff } from 'lucide-react';
@@ -91,14 +91,17 @@ export default function Settings({
   const handleTestConnection = async () => {
     setTesting(true);
     setTestResult(null);
-    // Make sure we use the latest values
-    const store = await getStore();
-    await store.set('supabase_url', values['supabase_url'] ?? '');
-    await store.set('supabase_key', values['supabase_key'] ?? '');
-    await store.save();
-    resetSupabaseClient();
-    const result = await testConnection();
-    setTestResult(result);
+    // Use current form values directly without saving to store first
+    const { createClient } = await import('@supabase/supabase-js');
+    const url = values['supabase_url'] ?? '';
+    const key = values['supabase_key'] ?? '';
+    try {
+      const client = createClient(url, key);
+      const { error } = await client.from('settings').select('key').limit(1);
+      setTestResult(error ? { ok: false, error: error.message } : { ok: true });
+    } catch (e) {
+      setTestResult({ ok: false, error: e instanceof Error ? e.message : 'Błąd połączenia' });
+    }
     setTesting(false);
   };
 

@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @source "../src/**/*.{tsx,ts,html,js}";
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   --color-bg: #f8fafc;
@@ -13,9 +14,11 @@
   --color-accent-dark: #1a2d4a;
   --color-orange: #e8622a;
   --color-yellow: #f5c842;
+  --color-card: #f1f5f9;
 }
 
 .dark {
+  --color-card: rgba(15, 23, 42, 0.55);
   --color-bg: rgba(15, 23, 42, 0.68);
   --color-sidebar: rgba(2, 6, 23, 0.88);
   --color-surface: rgba(30, 41, 59, 0.72);

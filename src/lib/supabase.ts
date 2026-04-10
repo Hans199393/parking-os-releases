@@ -57,6 +57,43 @@ export interface Database {
         };
         Relationships: [];
       };
+      chat_sessions: {
+        Row: {
+          id: string;
+          lang: string;
+          status: string;
+          started_at: string;
+          last_activity: string;
+        };
+        Insert: {
+          lang?: string;
+          status?: string;
+        };
+        Update: {
+          lang?: string;
+          status?: string;
+          last_activity?: string;
+        };
+        Relationships: [];
+      };
+      chat_messages: {
+        Row: {
+          id: number;
+          session_id: string;
+          role: string;
+          content: string;
+          created_at: string;
+        };
+        Insert: {
+          session_id: string;
+          role: string;
+          content: string;
+        };
+        Update: {
+          content?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: Record<string, never>;

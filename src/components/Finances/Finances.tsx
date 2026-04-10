@@ -17,6 +17,26 @@ function formatPLN(amount: number) {
   return amount.toLocaleString('pl-PL', { style: 'currency', currency: 'PLN' });
 }
 
+// Extracted outside RevenueForm to prevent remount on every render
+interface DenomRowProps {
+  d: typeof DENOMS[number];
+  qty: number;
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+}
+function DenomRow({ d, qty, onChange }: DenomRowProps) {
+  return (
+    <div className="grid grid-cols-3 gap-2 items-center mb-1">
+      <span className="text-sm text-white pl-1">{d.label}</span>
+      <input
+        type="number" min="0" step="1" value={qty}
+        onChange={onChange}
+        className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-sm text-center w-full focus:border-teal-500 outline-none"
+      />
+      <span className="text-right text-sm text-teal-300 font-medium">{formatPLN(qty * d.value)}</span>
+    </div>
+  );
+}
+
 // --- Daily Revenue Form ---
 interface RevenueFormProps {
   date: string;
@@ -69,21 +89,6 @@ function RevenueForm({ date, initial, onSave, onClose }: RevenueFormProps) {
     }
   };
 
-  const DenomRow = ({ d }: { d: typeof DENOMS[number] }) => {
-    const qty = form[d.key as keyof typeof form] as number;
-    return (
-      <div className="grid grid-cols-3 gap-2 items-center mb-1">
-        <span className="text-sm text-white pl-1">{d.label}</span>
-        <input
-          type="number" min="0" step="1" value={qty}
-          onChange={setQty(d.key)}
-          className="bg-slate-900 border border-slate-700 rounded px-2 py-1 text-white text-sm text-center w-full focus:border-teal-500 outline-none"
-        />
-        <span className="text-right text-sm text-teal-300 font-medium">{formatPLN(qty * d.value)}</span>
-      </div>
-    );
-  };
-
   return (
     <div className="flex flex-col gap-3 max-h-[72vh] overflow-y-auto pr-1">
       <p className="text-slate-400 text-sm">Data: <span className="text-white font-medium">{date}</span></p>
@@ -96,7 +101,7 @@ function RevenueForm({ date, initial, onSave, onClose }: RevenueFormProps) {
       {/* Coins */}
       <div>
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Monety</p>
-        {coinDenoms.map(d => <DenomRow key={d.key} d={d} />)}
+        {coinDenoms.map(d => <DenomRow key={d.key} d={d} qty={form[d.key as keyof typeof form] as number} onChange={setQty(d.key)} />)}
         <div className="flex justify-between text-xs bg-slate-900 rounded px-2 py-1.5 mt-1 border border-slate-700/50">
           <span className="text-slate-400">Razem monety</span>
           <span className="text-teal-400 font-semibold">{formatPLN(coins)}</span>
@@ -106,7 +111,7 @@ function RevenueForm({ date, initial, onSave, onClose }: RevenueFormProps) {
       {/* Banknotes */}
       <div>
         <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Banknoty</p>
-        {noteDenoms.map(d => <DenomRow key={d.key} d={d} />)}
+        {noteDenoms.map(d => <DenomRow key={d.key} d={d} qty={form[d.key as keyof typeof form] as number} onChange={setQty(d.key)} />)}
         <div className="flex justify-between text-xs bg-slate-900 rounded px-2 py-1.5 mt-1 border border-slate-700/50">
           <span className="text-slate-400">Razem banknoty</span>
           <span className="text-teal-400 font-semibold">{formatPLN(banknotes)}</span>
@@ -226,6 +231,7 @@ export default function Finances() {
   const [revenues, setRevenues] = useState<DailyRevenue[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<'revenues' | 'invoices' | 'stats'>('revenues');
   const [exporting, setExporting] = useState(false);
 
@@ -241,6 +247,7 @@ export default function Finances() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [rev, inv] = await Promise.all([
         getMonthlyRevenue(year, month),
@@ -248,8 +255,9 @@ export default function Finances() {
       ]);
       setRevenues(rev);
       setInvoices(inv);
-    } catch { /* ignore */ }
-    finally { setLoading(false); }
+    } catch (e) {
+      setLoadError(e instanceof Error ? e.message : 'Błąd ładowania danych');
+    } finally { setLoading(false); }
   }, [year, month]);
 
   useEffect(() => { load(); }, [load]);
@@ -348,6 +356,11 @@ export default function Finances() {
       <div className="flex-1 overflow-y-auto min-h-0">
         {loading ? (
           <div className="flex items-center justify-center h-40"><Spinner /></div>
+        ) : loadError ? (
+          <div className="flex flex-col items-center justify-center h-40 gap-3">
+            <p className="text-red-400 text-sm">{loadError}</p>
+            <Button variant="secondary" size="sm" onClick={load}>Spróbuj ponownie</Button>
+          </div>
         ) : tab === 'revenues' ? (
           <div>
             <table className="w-full text-sm">
@@ -385,7 +398,11 @@ export default function Finances() {
               </tbody>
             </table>
             <button
-              onClick={() => openRevModal(`${year}-${String(month).padStart(2,'0')}-${String(new Date().getDate()).padStart(2,'0')}`)}
+              onClick={() => {
+                const lastDay = new Date(year, month, 0).getDate();
+                const day = Math.min(new Date().getDate(), lastDay);
+                openRevModal(`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`);
+              }}
               className="mt-4 w-full py-3 border border-dashed border-slate-700 text-slate-500 text-sm rounded-xl hover:border-teal-500/50 hover:text-teal-400 transition-colors flex items-center justify-center gap-2"
             >
               <Plus size={16} /> Dodaj/edytuj dzień

@@ -1,4 +1,5 @@
 import React from 'react';
+import { X } from 'lucide-react';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
@@ -44,9 +45,9 @@ interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
 export function Input({ label, error, className = '', ...props }: InputProps) {
   return (
     <div className="flex flex-col gap-1">
-      {label && <label className="text-sm font-medium text-slate-300">{label}</label>}
+      {label && <label className="text-sm font-medium text-[var(--color-text)]">{label}</label>}
       <input
-        className={`bg-slate-800 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 focus:border-transparent placeholder-slate-500 ${error ? 'border-red-500' : ''} ${className}`}
+        className={`bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 focus:border-transparent placeholder-[var(--color-muted)] ${error ? 'border-red-500' : ''} ${className}`}
         {...props}
       />
       {error && <span className="text-xs text-red-400">{error}</span>}
@@ -61,9 +62,9 @@ interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
 export function Select({ label, children, className = '', ...props }: SelectProps) {
   return (
     <div className="flex flex-col gap-1">
-      {label && <label className="text-sm font-medium text-slate-300">{label}</label>}
+      {label && <label className="text-sm font-medium text-[var(--color-text)]">{label}</label>}
       <select
-        className={`bg-slate-800 border border-slate-600 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 ${className}`}
+        className={`bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 ${className}`}
         {...props}
       >
         {children}
@@ -99,10 +100,10 @@ export function Modal({ open, onClose, title, children }: ModalProps) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
-      <div className="relative bg-slate-800 border border-slate-600 rounded-xl shadow-2xl w-full max-w-md p-6 z-10">
+      <div className="relative bg-[var(--color-surface)] backdrop-blur-md border border-[var(--color-border)] rounded-xl shadow-2xl w-full max-w-md p-6 z-10">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-white">{title}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors text-xl leading-none">&times;</button>
+          <h2 className="text-lg font-semibold text-[var(--color-text)]">{title}</h2>
+          <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition-colors"><X size={18} /></button>
         </div>
         {children}
       </div>

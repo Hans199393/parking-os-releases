@@ -39,9 +39,11 @@ export default function Chat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<ReturnType<Awaited<ReturnType<typeof getSupabaseClient>>['channel']> | null>(null);
   const selectedSessionRef = useRef<string | null>(null);
+  const sessionsRef = useRef<ChatSession[]>([]);
 
-  // Keep ref in sync with state
+  // Keep refs in sync with state
   useEffect(() => { selectedSessionRef.current = selectedSession; }, [selectedSession]);
+  useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
 
   // Load sessions with filter & pagination
   const loadSessions = useCallback(async (append = false) => {
@@ -52,7 +54,7 @@ export default function Chat() {
         return;
       }
       const sb = await getSupabaseClient();
-      const offset = append ? sessions.length : 0;
+      const offset = append ? sessionsRef.current.length : 0;
       let query = sb
         .from('chat_sessions')
         .select('*')
@@ -106,7 +108,7 @@ export default function Chat() {
     } finally {
       setLoading(false);
     }
-  }, [filterTab, sessions.length]);
+  }, [filterTab]);
 
   // Load messages for selected session
   const loadMessages = useCallback(async (sessionId: string) => {
