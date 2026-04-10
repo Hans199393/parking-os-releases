@@ -65,8 +65,8 @@ async fn email_fetch_list(imap_host: String, imap_port: u16, user: String, pass:
             session.logout().ok();
             return Ok(vec![]);
         }
-        let range = if total > 50 { format!("{}:*", total - 49) } else { "1:*".to_string() };
-        let messages = session.fetch(&range, "UID FLAGS BODY.PEEK[HEADER]").map_err(|e| e.to_string())?;
+        let range = if total > 50 { format!("{}:*", total.saturating_sub(49)) } else { "1:*".to_string() };
+        let messages = session.fetch(&range, "(UID FLAGS BODY.PEEK[HEADER])").map_err(|e| e.to_string())?;
 
         let mut result: Vec<EmailMessage> = Vec::new();
         for msg in messages.iter() {
