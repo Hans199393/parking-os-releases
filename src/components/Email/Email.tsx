@@ -118,6 +118,14 @@ export default function Email() {
 
   useEffect(() => { loadEmails(); }, [loadEmails]);
 
+  // Auto-refresh inbox every 90 seconds
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!document.hidden) loadEmails();
+    }, 90_000);
+    return () => clearInterval(id);
+  }, [loadEmails]);
+
   const openEmail = async (email: EmailMessage, isSent = false) => {
     setSelected(email);
     setBody(null);
