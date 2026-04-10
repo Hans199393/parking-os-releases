@@ -47,6 +47,14 @@ fn find_part_body(mail: &mailparse::ParsedMail, mime: &str) -> Option<String> {
 
 // ─── Email commands ───────────────────────────────────────────────────────────
 #[tauri::command]
+fn get_logo_base64() -> String {
+    use base64::Engine;
+    let bytes = include_bytes!("../../public/logo2026.png");
+    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+    format!("data:image/png;base64,{}", b64)
+}
+
+#[tauri::command]
 async fn email_test_imap(imap_host: String, imap_port: u16, user: String, pass: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let mut session = imap_session(&imap_host, imap_port, &user, &pass)?;
@@ -282,6 +290,7 @@ pub fn run() {
             fetch_snapshot,
             spawn_pwa,
             stop_pwa,
+            get_logo_base64,
             email_test_imap,
             email_fetch_list,
             email_fetch_body,

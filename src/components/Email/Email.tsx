@@ -30,7 +30,7 @@ interface Compose {
 const SIG_SEPARATOR = '\n\n---\n';
 const REPLY_SIGNATURE = `${SIG_SEPARATOR}Michał Kłos | Parking płatny niestrzeżony\nkontakt@parkingsobieszewo.pl | tel. 784 828 748`;
 
-const LOGO_URL = 'https://hans199393.github.io/parking-michal-klos/assets/images/logo2026.png';
+const LOGO_FALLBACK = 'https://hans199393.github.io/parking-michal-klos/assets/images/logo2026.png';
 
 function buildHtmlSignature(logoSrc: string): string {
   return `
@@ -49,7 +49,7 @@ function buildHtmlSignature(logoSrc: string): string {
 </table>`;
 }
 
-function buildHtmlEmail(body: string): string {
+function buildHtmlEmail(body: string, logoSrc: string): string {
   const sepIdx = body.indexOf(SIG_SEPARATOR);
   const userText = sepIdx >= 0 ? body.slice(0, sepIdx) : body;
   const escaped = userText
@@ -57,7 +57,7 @@ function buildHtmlEmail(body: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/\n/g, '<br>');
-  return `<!DOCTYPE html><html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;line-height:1.6;max-width:600px">${escaped}${buildHtmlSignature(LOGO_URL)}</body></html>`;
+  return `<!DOCTYPE html><html><body style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#374151;line-height:1.6;max-width:600px">${escaped}${buildHtmlSignature(logoSrc)}</body></html>`;
 }
 
 export default function Email() {
@@ -74,6 +74,11 @@ export default function Email() {
   const [sendError, setSendError] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [logoSrc, setLogoSrc] = useState<string>(LOGO_FALLBACK);
+
+  useEffect(() => {
+    invoke<string>('get_logo_base64').then(setLogoSrc).catch(() => {});
+  }, []);
 
   const loadConfig = useCallback(async (): Promise<EmailConfig | null> => {
     const store = await getStore();
@@ -163,7 +168,7 @@ export default function Email() {
         pass: config.pass,
         to: compose.to.trim(),
         subject: compose.subject.trim(),
-        body: buildHtmlEmail(compose.body),
+        body: buildHtmlEmail(compose.body, logoSrc),
       });
       setCompose(null);
     } catch (e) {
