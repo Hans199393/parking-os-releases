@@ -370,7 +370,7 @@ export default function Email() {
                 <div className="flex items-center justify-center h-full"><Spinner /></div>
               ) : body !== null ? (
                 <iframe
-                  srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>html,body{background-color:#ffffff}body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.6;padding:24px;color:#1e293b;margin:0}a{color:#0ea5e9}img{max-width:100%}</style></head><body>${body}</body></html>`}
+                  srcDoc={`<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.6;padding:24px;color:#e2e8f0;margin:0}a{color:#38bdf8}img{max-width:100%}</style></head><body>${body}</body></html>`}
                   sandbox="allow-same-origin"
                   className="w-full h-full border-0"
                   title="email-body"
