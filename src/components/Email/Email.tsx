@@ -133,14 +133,21 @@ export default function Email() {
     try {
       const cfg = config ?? await loadConfig();
       if (!cfg) return;
-      // For sent folder, fetch body without marking as read
-      const html = await invoke<string>('email_fetch_body', {
-        imapHost: cfg.imap_host,
-        imapPort: cfg.imap_port,
-        user: cfg.user,
-        pass: cfg.pass,
-        uid: email.uid,
-      });
+      const html = isSent
+        ? await invoke<string>('email_fetch_sent_body', {
+            imapHost: cfg.imap_host,
+            imapPort: cfg.imap_port,
+            user: cfg.user,
+            pass: cfg.pass,
+            uid: email.uid,
+          })
+        : await invoke<string>('email_fetch_body', {
+            imapHost: cfg.imap_host,
+            imapPort: cfg.imap_port,
+            user: cfg.user,
+            pass: cfg.pass,
+            uid: email.uid,
+          });
       setBody(html);
       if (!isSent) setEmails(prev => prev.map(e => e.uid === email.uid ? { ...e, is_read: true } : e));
     } catch (e) {

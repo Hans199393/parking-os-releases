@@ -94,15 +94,47 @@ async fn email_fetch_list(imap_host: String, imap_port: u16, user: String, pass:
 }
 
 #[tauri::command]
-async fn email_fetch_body(imap_host: String, imap_port: u16, user: String, pass: String, uid: u32) -> Result<String, String> {
+async fn email_fetch_body(imap_host: String, imap_port: u16, user: String, pass: String, uid: u32, folder: Option<String>) -> Result<String, String> {
     tokio::task::spawn_blocking(move || {
         let mut session = imap_session(&imap_host, imap_port, &user, &pass)?;
-        session.select("INBOX").map_err(|e| e.to_string())?;
+        let folder_name = folder.unwrap_or_else(|| "INBOX".to_string());
+        session.select(&folder_name).map_err(|e| e.to_string())?;
         let messages = session.uid_fetch(uid.to_string(), "BODY[]").map_err(|e| e.to_string())?;
         let raw = messages.iter().next().and_then(|m| m.body()).unwrap_or(&[]);
         let parsed = mailparse::parse_mail(raw).map_err(|e| e.to_string())?;
         // Mark as read
         session.uid_store(uid.to_string(), "+FLAGS (\\Seen)").ok();
+        session.logout().ok();
+        if let Some(html) = find_part_body(&parsed, "text/html") {
+            return Ok(html);
+        }
+        let text = find_part_body(&parsed, "text/plain").unwrap_or_else(|| "(brak treści)".into());
+        let escaped = text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+        Ok(format!("<pre style='white-space:pre-wrap;font-family:sans-serif;font-size:14px;line-height:1.6'>{}</pre>", escaped))
+    }).await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn email_fetch_sent_body(imap_host: String, imap_port: u16, user: String, pass: String, uid: u32) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || {
+        let mut session = imap_session(&imap_host, imap_port, &user, &pass)?;
+        let sent_folder = {
+            let names: Vec<String> = match session.list(None, Some("*")) {
+                Ok(folders) => folders.iter().map(|n| n.name().to_string()).collect(),
+                Err(_) => vec![],
+            };
+            names.iter()
+                .find(|n| {
+                    let l = n.to_lowercase();
+                    l == "sent" || l == "sent messages" || l == "sent items" || l.contains("sent")
+                })
+                .cloned()
+                .unwrap_or_else(|| "Sent".to_string())
+        };
+        session.select(&sent_folder).map_err(|e| e.to_string())?;
+        let messages = session.uid_fetch(uid.to_string(), "BODY[]").map_err(|e| e.to_string())?;
+        let raw = messages.iter().next().and_then(|m| m.body()).unwrap_or(&[]);
+        let parsed = mailparse::parse_mail(raw).map_err(|e| e.to_string())?;
         session.logout().ok();
         if let Some(html) = find_part_body(&parsed, "text/html") {
             return Ok(html);
@@ -374,6 +406,7 @@ pub fn run() {
             email_fetch_list,
             email_fetch_sent,
             email_fetch_body,
+            email_fetch_sent_body,
             email_send,
             email_delete,
         ])
