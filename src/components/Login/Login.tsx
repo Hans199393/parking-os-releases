@@ -56,9 +56,7 @@ export default function Login({ onSuccess }: LoginProps) {
       <div className="w-full max-w-sm">
         {/* Logo / Title */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-teal-500/20 rounded-2xl mb-4">
-            <span className="text-3xl">🅿️</span>
-          </div>
+          <img src="/logo2026.png" alt="Parking.OS logo" className="h-20 w-auto mx-auto mb-4 drop-shadow-lg" />
           <h1 className="text-2xl font-bold text-white tracking-tight">Parking.OS</h1>
           <p className="text-slate-400 text-sm mt-1">Panel zarządzania parkingiem</p>
         </div>
