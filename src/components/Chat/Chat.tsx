@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MessageCircle, Send, User, Bot, RefreshCw, X, Trash2, CheckCircle, RotateCcw } from 'lucide-react';
+import { MessageCircle, Send, User, Bot, RefreshCw, X, Trash2, CheckCircle, RotateCcw, UserCheck, BotOff } from 'lucide-react';
 import { getSupabaseClient, isConfigured } from '../../lib/supabase';
 import { Spinner } from '../shared/UI';
 
@@ -11,6 +11,8 @@ interface ChatSession {
   last_activity: string;
   last_message?: string;
   message_count?: number;
+  bot_paused?: boolean;
+  bot_paused_at?: string | null;
 }
 
 interface ChatMessage {
@@ -36,6 +38,7 @@ export default function Chat() {
   const [filterTab, setFilterTab] = useState<FilterTab>('active');
   const [hasMore, setHasMore] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [togglingPause, setTogglingPause] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<ReturnType<Awaited<ReturnType<typeof getSupabaseClient>>['channel']> | null>(null);
   const selectedSessionRef = useRef<string | null>(null);
@@ -125,6 +128,25 @@ export default function Chat() {
       console.error('Error loading messages:', e);
     }
   }, []);
+
+  // Toggle bot_paused per session
+  const toggleBotPaused = async (sessionId: string, currentlyPaused: boolean) => {
+    setTogglingPause(true);
+    try {
+      const sb = await getSupabaseClient();
+      const update: Record<string, unknown> = currentlyPaused
+        ? { bot_paused: false, bot_paused_at: null }
+        : { bot_paused: true, bot_paused_at: new Date().toISOString() };
+      await (sb.from('chat_sessions') as any).update(update).eq('id', sessionId);
+      setSessions(prev => prev.map(s =>
+        s.id === sessionId ? { ...s, ...update } : s
+      ));
+    } catch (e) {
+      console.error('Error toggling bot pause:', e);
+    } finally {
+      setTogglingPause(false);
+    }
+  };
 
   // Close / reopen session
   const toggleSessionStatus = async (sessionId: string, currentStatus: string) => {
@@ -241,9 +263,13 @@ export default function Chat() {
         role: 'owner',
         content: ownerReply.trim()
       });
+      // Auto-pause bot when owner sends a message
       await sb.from('chat_sessions')
-        .update({ last_activity: new Date().toISOString() })
+        .update({ last_activity: new Date().toISOString(), bot_paused: true, bot_paused_at: new Date().toISOString() })
         .eq('id', selectedSession);
+      setSessions(prev => prev.map(s =>
+        s.id === selectedSession ? { ...s, bot_paused: true, bot_paused_at: new Date().toISOString() } : s
+      ));
       setOwnerReply('');
     } catch (e) {
       console.error('Error sending reply:', e);
@@ -353,6 +379,18 @@ export default function Chat() {
               {/* Session actions — visible on hover */}
               <div className="absolute right-2 top-1/2 -translate-y-1/2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <button
+                  onClick={(e) => { e.stopPropagation(); toggleBotPaused(s.id, !!s.bot_paused); }}
+                  title={s.bot_paused ? 'Zwróć Orłowi' : 'Przejmij rozmówę'}
+                  disabled={togglingPause}
+                  className={`p-1.5 rounded-md transition ${
+                    s.bot_paused
+                      ? 'text-amber-500 hover:bg-amber-500/10'
+                      : 'text-blue-400 hover:bg-blue-400/10'
+                  }`}
+                >
+                  {s.bot_paused ? <UserCheck size={14} /> : <BotOff size={14} />}
+                </button>
+                <button
                   onClick={(e) => { e.stopPropagation(); toggleSessionStatus(s.id, s.status); }}
                   title={s.status === 'active' ? 'Zamknij rozmowę' : 'Wznów rozmowę'}
                   className={`p-1.5 rounded-md transition ${
@@ -434,13 +472,20 @@ export default function Chat() {
                   const sess = sessions.find(s => s.id === selectedSession);
                   if (!sess) return null;
                   return (
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
-                      sess.status === 'active'
-                        ? 'bg-green-500/20 text-green-500'
-                        : 'bg-gray-500/20 text-gray-400'
-                    }`}>
-                      {sess.status === 'active' ? 'aktywna' : 'zamknięta'}
-                    </span>
+                    <>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                        sess.status === 'active'
+                          ? 'bg-green-500/20 text-green-500'
+                          : 'bg-gray-500/20 text-gray-400'
+                      }`}>
+                        {sess.status === 'active' ? 'aktywna' : 'zamknięta'}
+                      </span>
+                      {sess.bot_paused && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-semibold bg-amber-500/20 text-amber-500">
+                          👤 Ty przejąłeś
+                        </span>
+                      )}
+                    </>
                   );
                 })()}
               </div>
@@ -450,6 +495,19 @@ export default function Chat() {
                   if (!sess) return null;
                   return (
                     <>
+                      <button
+                        onClick={() => toggleBotPaused(sess.id, !!sess.bot_paused)}
+                        title={sess.bot_paused ? 'Zwróć Orłowi — włącz bota z powrotem' : 'Przejmij rozmówę — wyłącz bota'}
+                        disabled={togglingPause}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold transition ${
+                          sess.bot_paused
+                            ? 'bg-amber-500/20 text-amber-400 hover:bg-amber-500/30'
+                            : 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+                        }`}
+                      >
+                        {sess.bot_paused ? <UserCheck size={14} /> : <BotOff size={14} />}
+                        {sess.bot_paused ? 'Zwróć Orłowi' : 'Przejmij'}
+                      </button>
                       <button
                         onClick={() => toggleSessionStatus(sess.id, sess.status)}
                         title={sess.status === 'active' ? 'Zamknij rozmowę' : 'Wznów rozmowę'}
