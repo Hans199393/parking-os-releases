@@ -11,6 +11,9 @@ import MonthlyReport from './MonthlyReport';
 import YearlyReport from './YearlyReport';
 import AllTimeReport from './AllTimeReport';
 import WeeklyReport from './WeeklyReport';
+import ForecastReport from './ForecastReport';
+import WeatherReport from './WeatherReport';
+import SeasonCompare from './SeasonCompare';
 import { verifyPassword } from '../../lib/auth';
 import { getStore } from '../../lib/store';
 import { Button, Input, Select, Modal, Card, Spinner } from '../shared/UI';
@@ -347,7 +350,7 @@ export default function Finances() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'revenues' | 'invoices' | 'stats' | 'raport-d' | 'raport-m' | 'raport-r' | 'all-time' | 'raport-w'>('revenues');
+  const [tab, setTab] = useState<'revenues' | 'invoices' | 'stats' | 'raport-d' | 'raport-m' | 'raport-r' | 'all-time' | 'raport-w' | 'prognoza' | 'pogoda' | 'sezony'>('revenues');
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedDayDate, setSelectedDayDate] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -541,6 +544,9 @@ export default function Finances() {
           ['raport-m', 'Raport mies.'],
           ['raport-r', 'Raport roczny'],
           ['all-time', '★ Parking cały'],
+          ['prognoza', '📈 Prognoza'],
+          ['pogoda', '🌤️ Pogoda'],
+          ['sezony', '📊 Sezony'],
         ] as const).map(([t, label]) => (
           <button
             key={t}
@@ -651,6 +657,12 @@ export default function Finances() {
           />
         ) : tab === 'all-time' ? (
           <AllTimeReport />
+        ) : tab === 'prognoza' ? (
+          <ForecastReport currentYear={year} />
+        ) : tab === 'pogoda' ? (
+          <WeatherReport revenues={revenues} />
+        ) : tab === 'sezony' ? (
+          <SeasonCompare currentYear={year} />
         ) : tab === 'invoices' ? (
           <div>
             <div className="flex justify-end mb-3">
