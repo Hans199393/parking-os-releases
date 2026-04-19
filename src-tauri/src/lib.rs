@@ -276,6 +276,83 @@ async fn email_delete(imap_host: String, imap_port: u16, user: String, pass: Str
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── Detector process management ─────────────────────────────────────────────
+pub struct DetectorProcess(pub Arc<Mutex<Option<Child>>>);
+
+#[tauri::command]
+fn spawn_detector(
+    state: tauri::State<'_, DetectorProcess>,
+    rtsp_url: String,
+    db_path: String,
+    roi: Option<String>,
+    line: Option<f64>,
+) -> Result<u16, String> {
+    let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+
+    // Zatrzymaj poprzednią instancję
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let detector_py = manifest_dir
+        .parent()
+        .ok_or("Nie można znaleźć katalogu głównego")?
+        .join("detection")
+        .join("detector.py");
+
+    if !detector_py.exists() {
+        return Err(format!("Nie znaleziono detector.py: {}", detector_py.display()));
+    }
+
+    let mut cmd = std::process::Command::new("python");
+    cmd.arg(detector_py.to_str().unwrap_or(""))
+        .arg("--rtsp").arg(&rtsp_url)
+        .arg("--db").arg(&db_path)
+        .arg("--port").arg("8890");
+
+    if let Some(r) = roi {
+        cmd.arg("--roi").arg(r);
+    }
+    if let Some(l) = line {
+        cmd.arg("--line").arg(l.to_string());
+    }
+
+    let child = cmd.spawn().map_err(|e| format!("Nie można uruchomić detektora: {}", e))?;
+    *guard = Some(child);
+    Ok(8890)
+}
+
+#[tauri::command]
+fn stop_detector(state: tauri::State<'_, DetectorProcess>) -> Result<(), String> {
+    let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn detector_is_running(state: tauri::State<'_, DetectorProcess>) -> bool {
+    let mut guard = match state.0.lock() {
+        Ok(g) => g,
+        Err(_) => return false,
+    };
+    if let Some(child) = guard.as_mut() {
+        match child.try_wait() {
+            Ok(None) => true,  // Nadal działa
+            _ => {
+                *guard = None;
+                false
+            }
+        }
+    } else {
+        false
+    }
+}
+
 // ─── PWA server process management ──────────────────────────────────────────
 pub struct PwaServer(pub Arc<Mutex<Option<Child>>>);
 
@@ -389,6 +466,7 @@ async fn fetch_snapshot(url: String) -> Result<String, String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(PwaServer(Arc::new(Mutex::new(None))))
+        .manage(DetectorProcess(Arc::new(Mutex::new(None))))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
@@ -401,6 +479,9 @@ pub fn run() {
             fetch_snapshot,
             spawn_pwa,
             stop_pwa,
+            spawn_detector,
+            stop_detector,
+            detector_is_running,
             get_logo_base64,
             email_test_imap,
             email_fetch_list,

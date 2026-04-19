@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect, useRef, useCallback } from 'react';
 import RTSPPlayer from './RTSPPlayer';
 import { invoke } from '@tauri-apps/api/core';
+import DetectorPanel from './DetectorPanel';
 import { Maximize2, Minimize2, RefreshCw, Copy, Play, Image, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Home } from 'lucide-react';
 
 type CameraMode = 'snapshot' | 'hls';
@@ -307,6 +308,9 @@ export default function Cameras({ cam1SnapshotUrl, cam1RtspUrl, cam1HlsUrl, cam2
       </div>
 
       {/* Setup instructions if no cameras configured */}
+      {/* Detector Panel — zawsze widoczny nad kamerami */}
+      <DetectorPanel cam1RtspUrl={cam1RtspUrl} />
+
       {!anyConfigured && (
         <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 mb-6">
           <h3 className="text-amber-400 font-semibold text-sm mb-3">Jak uruchomić podgląd kamer?</h3>

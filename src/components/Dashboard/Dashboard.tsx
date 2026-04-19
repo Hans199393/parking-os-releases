@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Camera, CalendarDays, Bell, CloudSun } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { Camera, CalendarDays, Bell, Car } from 'lucide-react';
 import { getReservationsForDate, getExtraOpenDays } from '../../lib/supabase';
 import { Card, Spinner } from '../shared/UI';
 import { Page } from '../Sidebar/Sidebar';
@@ -111,6 +111,26 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
   const [loading, setLoading] = useState(true);
   const [weatherWidgets, setWeatherWidgets] = useState<WeatherInfo[]>([]);
   const [weatherLoading, setWeatherLoading] = useState(true);
+  const [onParking, setOnParking] = useState<number | null>(null);
+  const [todayIn, setTodayIn]   = useState<number | null>(null);
+  const detectorPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Polling statusu detektora
+  useEffect(() => {
+    async function fetchDetector() {
+      try {
+        const res = await fetch('http://127.0.0.1:8890/status');
+        if (res.ok) {
+          const data = await res.json();
+          setOnParking(data.on_parking ?? 0);
+          setTodayIn(data.today_in ?? 0);
+        }
+      } catch { /* detektor nie działa — nic nie pokazuj */ }
+    }
+    fetchDetector();
+    detectorPollRef.current = setInterval(fetchDetector, 5000);
+    return () => { if (detectorPollRef.current) clearInterval(detectorPollRef.current); };
+  }, []);
 
   const cameras = [
     { label: 'CAM 1', url: cam1HlsUrl },
@@ -201,8 +221,8 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
         )}
       </div>
 
-      {/* Weather widgets */}
-      {(weatherLoading || weatherWidgets.length > 0) && (
+      {/* Weather widgets + detektor */}
+      {(weatherLoading || weatherWidgets.length > 0 || onParking !== null) && (
         <div className="flex gap-3 mb-3 flex-shrink-0">
           {weatherLoading ? (
             <div className="flex items-center gap-2 text-slate-500 text-xs"><Spinner size="sm" /> Ładowanie pogody…</div>
@@ -217,6 +237,20 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
                 </div>
               </div>
             ))
+          )}
+          {onParking !== null && (
+            <div
+              className="flex items-center gap-3 bg-teal-900/30 border border-teal-600/40 rounded-xl px-4 py-2.5 min-w-[160px] cursor-pointer hover:bg-teal-900/50 transition-colors"
+              onClick={() => onNavigate('cameras')}
+              title="Przejdź do kamer / detektora"
+            >
+              <Car size={28} className="text-teal-400 flex-shrink-0" />
+              <div>
+                <p className="text-xs text-teal-400 font-medium">Na parkingu</p>
+                <p className="text-xl font-bold text-white leading-tight">{onParking}</p>
+                <p className="text-[11px] text-slate-400">Wjazdy dziś: {todayIn ?? 0}</p>
+              </div>
+            </div>
           )}
         </div>
       )}
