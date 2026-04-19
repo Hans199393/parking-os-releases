@@ -1,7 +1,16 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MessageCircle, Send, User, Bot, RefreshCw, X, Trash2, CheckCircle, RotateCcw, UserCheck, BotOff } from 'lucide-react';
+import { MessageCircle, Send, User, Bot, RefreshCw, X, Trash2, CheckCircle, RotateCcw, UserCheck, BotOff, MessageSquare } from 'lucide-react';
 import { getSupabaseClient, isConfigured } from '../../lib/supabase';
 import { Spinner } from '../shared/UI';
+
+interface MessengerConversation {
+  messenger_id: string;
+  state: string;
+  messages: { role: 'user' | 'assistant'; content: string }[];
+  updated_at: string;
+  // enriched
+  registration?: string;
+}
 
 interface ChatSession {
   id: string;
@@ -28,6 +37,10 @@ type FilterTab = 'active' | 'closed' | 'all';
 const PAGE_SIZE = 20;
 
 export default function Chat() {
+  // Top-level source toggle
+  const [chatSource, setChatSource] = useState<'widget' | 'messenger'>('widget');
+
+  // Widget state
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -43,6 +56,46 @@ export default function Chat() {
   const channelRef = useRef<ReturnType<Awaited<ReturnType<typeof getSupabaseClient>>['channel']> | null>(null);
   const selectedSessionRef = useRef<string | null>(null);
   const sessionsRef = useRef<ChatSession[]>([]);
+
+  // Messenger state
+  const [messengerConvs, setMessengerConvs] = useState<MessengerConversation[]>([]);
+  const [selectedConv, setSelectedConv] = useState<string | null>(null);
+  const [messengerLoading, setMessengerLoading] = useState(false);
+  const [messengerError, setMessengerError] = useState<string | null>(null);
+
+  const loadMessengerConvs = useCallback(async () => {
+    setMessengerLoading(true);
+    setMessengerError(null);
+    try {
+      if (!(await isConfigured())) { setMessengerError('Supabase nie skonfigurowany.'); return; }
+      const sb = await getSupabaseClient();
+      const { data, error: err } = await (sb as any)
+        .from('conversations')
+        .select('messenger_id, state, messages, updated_at')
+        .order('updated_at', { ascending: false })
+        .limit(50);
+      if (err) throw err;
+      const rows = (data || []) as MessengerConversation[];
+      // Enrich with registration from reservations
+      const enriched = await Promise.all(rows.map(async (c) => {
+        try {
+          const { data: res } = await sb
+            .from('reservations')
+            .select('registration')
+            .eq('messenger_id', c.messenger_id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          return { ...c, registration: (res as any)?.registration };
+        } catch { return c; }
+      }));
+      setMessengerConvs(enriched);
+    } catch (e: unknown) {
+      setMessengerError(e instanceof Error ? e.message : 'Błąd ładowania');
+    } finally {
+      setMessengerLoading(false);
+    }
+  }, []);
 
   // Keep refs in sync with state
   useEffect(() => { selectedSessionRef.current = selectedSession; }, [selectedSession]);
@@ -308,9 +361,143 @@ export default function Chat() {
   if (error) return <div className="flex items-center justify-center h-full text-red-400">{error}</div>;
 
   return (
-    <div className="flex h-full">
-      {/* Sessions list */}
-      <div className="w-80 border-r border-[var(--color-border)] flex flex-col bg-[var(--color-bg)]">
+    <div className="flex flex-col h-full">
+      {/* Source toggle */}
+      <div className="flex border-b border-[var(--color-border)] bg-[var(--color-sidebar)] flex-shrink-0">
+        <button
+          onClick={() => setChatSource('widget')}
+          className={`flex items-center gap-2 px-5 py-3 text-sm font-semibold transition border-b-2 ${
+            chatSource === 'widget'
+              ? 'border-teal-500 text-teal-400'
+              : 'border-transparent text-[var(--color-muted)] hover:text-[var(--color-text)]'
+          }`}
+        >
+          <MessageCircle size={15} /> Widget (strona WWW)
+        </button>
+        <button
+          onClick={() => { setChatSource('messenger'); loadMessengerConvs(); }}
+          className={`flex items-center gap-2 px-5 py-3 text-sm font-semibold transition border-b-2 ${
+            chatSource === 'messenger'
+              ? 'border-blue-500 text-blue-400'
+              : 'border-transparent text-[var(--color-muted)] hover:text-[var(--color-text)]'
+          }`}
+        >
+          <MessageSquare size={15} /> Messenger
+        </button>
+      </div>
+
+      {chatSource === 'messenger' ? (
+        /* ===== MESSENGER VIEW ===== */
+        <div className="flex flex-1 min-h-0">
+          {/* Conversations list */}
+          <div className="w-80 border-r border-[var(--color-border)] flex flex-col bg-[var(--color-bg)] flex-shrink-0">
+            <div className="px-4 py-3 border-b border-[var(--color-border)] flex items-center justify-between">
+              <h2 className="font-bold text-[var(--color-text)] flex items-center gap-2">
+                <MessageSquare size={16} className="text-blue-400" /> Messenger
+              </h2>
+              <button onClick={loadMessengerConvs} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition">
+                <RefreshCw size={16} />
+              </button>
+            </div>
+            <div className="text-[11px] text-[var(--color-muted)] px-4 py-1.5 bg-blue-500/5 border-b border-[var(--color-border)]">
+              Ostatnie 50 konwersacji · tylko odczyt
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              {messengerLoading && <div className="flex justify-center py-8"><Spinner /></div>}
+              {messengerError && <div className="p-4 text-red-400 text-sm">{messengerError}</div>}
+              {!messengerLoading && messengerConvs.length === 0 && (
+                <div className="p-4 text-center text-[var(--color-muted)] text-sm">Brak konwersacji 💬</div>
+              )}
+              {messengerConvs.map(c => {
+                const lastMsg = c.messages?.slice(-1)[0];
+                return (
+                  <button
+                    key={c.messenger_id}
+                    onClick={() => setSelectedConv(c.messenger_id)}
+                    className={`w-full text-left px-4 py-3 border-b border-[var(--color-border)] hover:bg-[var(--color-surface)] transition ${
+                      selectedConv === c.messenger_id ? 'bg-[var(--color-surface)]' : ''
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="text-sm font-medium text-[var(--color-text)] truncate">
+                        💬 {c.registration ? `🚗 ${c.registration}` : `PSID …${c.messenger_id.slice(-6)}`}
+                      </span>
+                      <span className="text-[10px] text-[var(--color-muted)] flex-shrink-0 ml-1">{timeAgo(c.updated_at)}</span>
+                    </div>
+                    {lastMsg && (
+                      <div className="text-xs text-[var(--color-muted)] truncate">
+                        {lastMsg.role === 'user' ? '🧑' : '🤖'} {lastMsg.content.slice(0, 60)}
+                      </div>
+                    )}
+                    <div className="text-[10px] text-[var(--color-muted)] mt-0.5">
+                      {(c.messages?.length ?? 0)} wiad. · stan: {c.state}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Conversation messages */}
+          <div className="flex-1 flex flex-col bg-[var(--color-bg)] min-h-0">
+            {!selectedConv ? (
+              <div className="flex-1 flex items-center justify-center text-[var(--color-muted)]">
+                <div className="text-center">
+                  <MessageSquare size={40} className="mx-auto mb-3 opacity-30 text-blue-400" />
+                  <p>Wybierz konwersację z listy</p>
+                  <p className="text-xs mt-1 opacity-60">Historia ostatnich 12 wiadomości z Messengera</p>
+                </div>
+              </div>
+            ) : (() => {
+              const conv = messengerConvs.find(c => c.messenger_id === selectedConv);
+              if (!conv) return null;
+              return (
+                <>
+                  <div className="px-4 py-3 border-b border-[var(--color-border)] flex items-center gap-2">
+                    <MessageSquare size={16} className="text-blue-400" />
+                    <span className="font-medium text-sm text-[var(--color-text)]">
+                      {conv.registration ? `🚗 ${conv.registration}` : `PSID: ${conv.messenger_id}`}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-700 text-slate-300 ml-1">
+                      stan: {conv.state}
+                    </span>
+                    <span className="text-xs text-[var(--color-muted)] ml-auto">{fmtDate(conv.updated_at)}</span>
+                    <button onClick={() => setSelectedConv(null)} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition md:hidden ml-1">
+                      <X size={16} />
+                    </button>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {(!conv.messages || conv.messages.length === 0) && (
+                      <div className="text-center text-[var(--color-muted)] text-sm py-8">Brak wiadomości w historii</div>
+                    )}
+                    {(conv.messages || []).map((msg, i) => (
+                      <div key={i} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
+                        <div className={`max-w-[75%] rounded-2xl px-4 py-2 text-sm ${
+                          msg.role === 'user'
+                            ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-900 dark:text-blue-100 rounded-bl-md'
+                            : 'bg-teal-100 dark:bg-teal-900/40 text-teal-900 dark:text-teal-100 rounded-br-md'
+                        }`}>
+                          <div className="flex items-center gap-1.5 mb-1">
+                            {msg.role === 'user' ? <User size={12} /> : <Bot size={12} />}
+                            <span className="text-[10px] opacity-60">{msg.role === 'user' ? 'Klient Messenger' : 'Orzeł AI'}</span>
+                          </div>
+                          <p className="whitespace-pre-wrap">{msg.content}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="px-4 py-2 border-t border-[var(--color-border)] text-[11px] text-[var(--color-muted)] text-center bg-blue-500/5">
+                    📌 Odczyt historii Messenger · odpowiadaj przez Facebook Messenger
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      ) : (
+        /* ===== WIDGET VIEW (existing) ===== */
+        <div className="flex flex-1 min-h-0">
+        <div className="w-80 border-r border-[var(--color-border)] flex flex-col bg-[var(--color-bg)]">
         <div className="px-4 py-3 border-b border-[var(--color-border)] flex items-center justify-between">
           <h2 className="font-bold text-[var(--color-text)] flex items-center gap-2">
             <MessageCircle size={18} /> Czat Orzeł
@@ -585,6 +772,8 @@ export default function Chat() {
           </>
         )}
       </div>
+    </div>
+      )}
     </div>
   );
 }
