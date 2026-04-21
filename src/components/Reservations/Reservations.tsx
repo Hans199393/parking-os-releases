@@ -13,6 +13,7 @@ import {
   Reservation, NoShowBan, ParkingEvent, fromDbDate, isConfigured, NO_SHOW_BAN_THRESHOLD
 } from '../../lib/supabase';
 import { Button, Input, Modal, Spinner } from '../shared/UI';
+import { logBan, logUnban } from '../../lib/logger';
 
 // ---------------------------------------------------------------------------
 // Pogoda — Open-Meteo (free, no API key)
@@ -360,6 +361,7 @@ export default function Reservations({ onBadgeChange }: ReservationsProps) {
     setBanSaving(true);
     try {
       await banVehicle(banForm.trim(), banReason.trim() || undefined);
+      logBan(banForm.trim(), banReason.trim() || undefined);
       setBanForm('');
       setBanReason('');
       setBanFormOpen(false);
@@ -374,6 +376,7 @@ export default function Reservations({ onBadgeChange }: ReservationsProps) {
   const handleUnban = async (reg: string) => {
     try {
       await unbanVehicle(reg);
+      logUnban(reg, 'odblokowanie');
       await loadBans();
     } catch (err: unknown) {
       alert('Błąd: ' + (err instanceof Error ? err.message : String(err)));
@@ -383,6 +386,7 @@ export default function Reservations({ onBadgeChange }: ReservationsProps) {
   const handleResetCount = async (reg: string) => {
     try {
       await resetNoShowCount(reg);
+      logUnban(reg, 'reset licznika no-show');
       await loadBans();
     } catch (err: unknown) {
       alert('Błąd: ' + (err instanceof Error ? err.message : String(err)));
@@ -392,6 +396,7 @@ export default function Reservations({ onBadgeChange }: ReservationsProps) {
   const handleDeleteBan = async (reg: string) => {
     try {
       await deleteFromBanList(reg);
+      logUnban(reg, 'usunieto z listy blokad');
       await loadBans();
     } catch (err: unknown) {
       alert('Błąd: ' + (err instanceof Error ? err.message : String(err)));

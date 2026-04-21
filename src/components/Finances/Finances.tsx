@@ -6,6 +6,7 @@ import {
   getTotalInvestments, getTotalRevenue,
 } from '../../lib/database';
 import { exportMonthToExcel, exportOwnerToExcel } from '../../lib/excel';
+import { logInvoiceAction, logExport } from '../../lib/logger';
 import DailyReport from './DailyReport';
 import MonthlyReport from './MonthlyReport';
 import YearlyReport from './YearlyReport';
@@ -310,8 +311,10 @@ function InvoiceForm({ initial, defaultDate, onSave, onClose }: InvoiceFormProps
     try {
       if (initial?.id) {
         await updateInvoice(initial.id, form);
+        logInvoiceAction('update', String(initial.id), form.name);
       } else {
         await addInvoice(form);
+        logInvoiceAction('add', '', form.name);
       }
       onSave();
       onClose();
@@ -444,7 +447,7 @@ export default function Finances() {
   const handleDeleteInvoice = async () => {
     if (!deleteInvId) return;
     setDeleting(true);
-    try { await deleteInvoice(deleteInvId); setDeleteInvId(null); await load(); }
+    try { await deleteInvoice(deleteInvId); logInvoiceAction('delete', String(deleteInvId)); setDeleteInvId(null); await load(); }
     finally { setDeleting(false); }
   };
 
@@ -471,14 +474,14 @@ export default function Finances() {
 
   const handleExport = async () => {
     setExporting(true);
-    try { await exportMonthToExcel(year, month, revenues, invoices); }
+    try { await exportMonthToExcel(year, month, revenues, invoices); logExport('month', year, month); }
     catch (e) { console.error(e); }
     finally { setExporting(false); }
   };
 
   const handleExportOwner = async () => {
     setExportingOwner(true);
-    try { await exportOwnerToExcel(year, month, revenues, invoices, totalInvestments, commissionRateMain); }
+    try { await exportOwnerToExcel(year, month, revenues, invoices, totalInvestments, commissionRateMain); logExport('owner', year, month); }
     catch (e) { console.error(e); }
     finally { setExportingOwner(false); }
   };
