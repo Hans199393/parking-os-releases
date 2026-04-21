@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
-import { Camera, CalendarDays, Bell, Car } from 'lucide-react';
-import { getReservationsForDate, getExtraOpenDays } from '../../lib/supabase';
-import { Card, Spinner } from '../shared/UI';
+import { Camera, CalendarDays, Bell, Car, AlertTriangle, X } from 'lucide-react';
+import { getReservationsForDate, getExtraOpenDays, getBotAlerts, resolveBotAlert, type BotAlert } from '../../lib/supabase';
+import { Spinner } from '../shared/UI';
 import { Page } from '../Sidebar/Sidebar';
 import RTSPPlayer from '../Cameras/RTSPPlayer';
 
@@ -113,7 +113,9 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
   const [weatherLoading, setWeatherLoading] = useState(true);
   const [onParking, setOnParking] = useState<number | null>(null);
   const [todayIn, setTodayIn]   = useState<number | null>(null);
+  const [botAlerts, setBotAlerts] = useState<BotAlert[]>([]);
   const detectorPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const alertPollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Polling statusu detektora
   useEffect(() => {
@@ -130,6 +132,19 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
     fetchDetector();
     detectorPollRef.current = setInterval(fetchDetector, 5000);
     return () => { if (detectorPollRef.current) clearInterval(detectorPollRef.current); };
+  }, []);
+
+  // Polling bot_alerts (co 60s)
+  useEffect(() => {
+    async function fetchAlerts() {
+      try {
+        const alerts = await getBotAlerts(true);
+        setBotAlerts(alerts);
+      } catch { /* ignore */ }
+    }
+    fetchAlerts();
+    alertPollRef.current = setInterval(fetchAlerts, 60000);
+    return () => { if (alertPollRef.current) clearInterval(alertPollRef.current); };
   }, []);
 
   const cameras = [
@@ -222,8 +237,8 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
       </div>
 
       {/* Weather widgets + detektor */}
-      {(weatherLoading || weatherWidgets.length > 0 || onParking !== null) && (
-        <div className="flex gap-3 mb-3 flex-shrink-0">
+      {(weatherLoading || weatherWidgets.length > 0 || onParking !== null || botAlerts.length > 0) && (
+        <div className="flex gap-3 mb-3 flex-shrink-0 flex-wrap">
           {weatherLoading ? (
             <div className="flex items-center gap-2 text-slate-500 text-xs"><Spinner size="sm" /> Ładowanie pogody…</div>
           ) : (
@@ -252,6 +267,42 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
               </div>
             </div>
           )}
+          {botAlerts.map(alert => {
+            const labelMap: Record<string, string> = {
+              groq_tpd_limit: 'TPD — dzienny limit tokenów',
+              groq_rpm_limit: 'RPM — minutowy limit zapytań',
+              groq_timeout:   'Timeout — brak odpowiedzi AI',
+              groq_error:     'Błąd API AI',
+              groq_rate_limit: 'Limit tokenów (legacy)',
+            };
+            const label = labelMap[alert.type] ?? alert.type;
+            return (
+              <div
+                key={alert.id}
+                className="flex items-center gap-3 bg-red-900/30 border border-red-600/40 rounded-xl px-4 py-2.5 min-w-[200px] max-w-[340px]"
+                title={alert.message ?? alert.type}
+              >
+                <AlertTriangle size={24} className="text-red-400 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-red-400 font-semibold">⚠️ Bot — usterka</p>
+                  <p className="text-sm text-white font-medium truncate">{label}</p>
+                  <p className="text-[11px] text-slate-400">
+                    {new Date(alert.created_at).toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'numeric' })}
+                  </p>
+                </div>
+                <button
+                  className="text-slate-500 hover:text-red-300 transition-colors flex-shrink-0 ml-1"
+                  title="Oznacz jako rozwiązane"
+                  onClick={async () => {
+                    await resolveBotAlert(alert.id);
+                    setBotAlerts(prev => prev.filter(a => a.id !== alert.id));
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
 

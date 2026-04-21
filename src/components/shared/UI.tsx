@@ -10,7 +10,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 export function Button({ variant = 'primary', size = 'md', loading, children, className = '', disabled, ...props }: ButtonProps) {
   const base = 'inline-flex items-center justify-center font-medium rounded-lg transition-all duration-150 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2';
   const variants = {
-    primary: 'bg-teal-500 text-white hover:bg-teal-600 focus:ring-teal-400',
+    primary: 'bg-[var(--color-accent)] text-white hover:opacity-90 focus:ring-[var(--color-accent)]',
     secondary: 'bg-slate-700 text-white hover:bg-slate-600 focus:ring-slate-400',
     danger: 'bg-red-600 text-white hover:bg-red-700 focus:ring-red-400',
     ghost: 'bg-transparent text-slate-300 hover:bg-slate-700 focus:ring-slate-400',
@@ -47,7 +47,7 @@ export function Input({ label, error, className = '', ...props }: InputProps) {
     <div className="flex flex-col gap-1">
       {label && <label className="text-sm font-medium text-[var(--color-text)]">{label}</label>}
       <input
-        className={`bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 focus:border-transparent placeholder-[var(--color-muted)] ${error ? 'border-red-500' : ''} ${className}`}
+        className={`bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] focus:border-transparent placeholder-[var(--color-muted)] ${error ? 'border-red-500' : ''} ${className}`}
         {...props}
       />
       {error && <span className="text-xs text-red-400">{error}</span>}
@@ -64,7 +64,7 @@ export function Select({ label, children, className = '', ...props }: SelectProp
     <div className="flex flex-col gap-1">
       {label && <label className="text-sm font-medium text-[var(--color-text)]">{label}</label>}
       <select
-        className={`bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-400 ${className}`}
+        className={`bg-[var(--color-surface)] border border-[var(--color-border)] text-[var(--color-text)] rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)] ${className}`}
         {...props}
       >
         {children}

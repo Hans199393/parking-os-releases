@@ -924,9 +924,9 @@ export default function Reservations({ onBadgeChange }: ReservationsProps) {
                       <td className="py-2 px-3 text-slate-500 text-xs font-mono">
                         {e.details ? (
                           <span>
-                            {e.details.registration && <span className="text-white font-semibold tracking-wider mr-2">{String(e.details.registration)}</span>}
-                            {e.details.date && <span className="mr-2">{String(e.details.date)}</span>}
-                            {e.details.now_banned && <span className="text-red-400 font-bold">→ ZABLOKOWANY</span>}
+                            {!!e.details.registration && <span className="text-white font-semibold tracking-wider mr-2">{String(e.details.registration ?? '')}</span>}
+                            {!!e.details.date && <span className="mr-2">{String(e.details.date ?? '')}</span>}
+                            {!!e.details.now_banned && <span className="text-red-400 font-bold">→ ZABLOKOWANY</span>}
                           </span>
                         ) : '–'}
                       </td>

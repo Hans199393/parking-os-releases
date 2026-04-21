@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState } from 'react';
+import { logCameraOnline, logCameraOffline } from '../../lib/logger';
 
 /**
  * HLS player — łączy się ze streamem HLS serwowanym przez lokalny proxy ffmpeg.
@@ -136,8 +137,21 @@ export default function RTSPPlayer({ streamUrl, label, fill }: { streamUrl: stri
     };
   }, [streamUrl]);
 
+  // Loguj zmiany stanu kamery
+  const prevStatusRef = useRef<typeof status | null>(null);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = status;
+    if (prev === null) return; // pierwsze renderowanie — nie loguj
+    if (status === 'playing' && prev !== 'playing') {
+      logCameraOnline(label ?? 'Kamera', streamUrl);
+    } else if ((status === 'error') && prev === 'playing') {
+      logCameraOffline(label ?? 'Kamera', streamUrl, 'błąd streamu');
+    }
+  }, [status, label, streamUrl]);
+
   return (
-    <div className={`relative bg-black rounded-xl overflow-hidden border border-slate-700 ${fill ? 'h-full' : ''}`} style={fill ? undefined : { aspectRatio: '16/9' }}>
+    <div className={`relative bg-black overflow-hidden ${fill ? 'absolute inset-0' : 'rounded-xl border border-slate-700'}`} style={fill ? undefined : { aspectRatio: '16/9' }}>
       {label && (
         <div className="absolute top-2 left-2 z-10">
           <span className="text-xs text-white bg-black/60 px-2 py-0.5 rounded font-medium">{label}</span>

@@ -34,8 +34,8 @@ const cameras = [
   { id: 'cam1', rtsp: process.env.CAM1_RTSP || '', transcode: true,  transport: 'tcp',  viaMediamtx: false },
   // cam2 YCC365Plus C-P05: UDP RTSP, sesja zamykana przez kamerę co ~21s bez keepalive → mediamtx
   { id: 'cam2', rtsp: process.env.CAM2_RTSP || '', transcode: true,  transport: 'udp',  viaMediamtx: true },
-  // cam3 YCC365Plus #2: identyczny problem jak cam2 → mediamtx
-  { id: 'cam3', rtsp: process.env.CAM3_RTSP || '', transcode: true,  transport: 'udp',  viaMediamtx: true },
+  // cam3 YCC365Plus #2 / TAS-Tech firmware: TCP direct (mediamtx nie obsługuje), czeka na IDR
+  { id: 'cam3', rtsp: process.env.CAM3_RTSP || '', transcode: true,  transport: 'tcp',  viaMediamtx: false, tastech: true },
   { id: 'cam4', rtsp: process.env.CAM4_RTSP || '', transcode: false, transport: 'udp',  viaMediamtx: false },
 ].filter(c => c.rtsp);
 
@@ -328,13 +328,14 @@ function startCamera(cam) {
   const transportArgs = isTcp
     ? [
         '-rtsp_transport', 'tcp',
-        '-analyzeduration', '3000000',
-        '-probesize',       '3000000',
+        '-analyzeduration', cam.tastech ? '10000000' : '3000000',
+        '-probesize',       cam.tastech ? '10000000' : '3000000',
         '-fflags',          '+discardcorrupt+genpts+nobuffer',
         '-flags',           'low_delay',
         '-max_delay',       '0',
         '-reorder_queue_size', '0',
         '-err_detect',      'ignore_err',
+        ...(cam.tastech ? ['-avoid_negative_ts', 'make_zero', '-use_wallclock_as_timestamps', '1'] : []),
       ]
     : [
         '-rtsp_transport', 'udp',

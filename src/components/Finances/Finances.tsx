@@ -14,7 +14,7 @@ import WeeklyReport from './WeeklyReport';
 import ForecastReport from './ForecastReport';
 import WeatherReport from './WeatherReport';
 import SeasonCompare from './SeasonCompare';
-import { verifyPassword } from '../../lib/auth';
+import { verifyCurrentPassword } from '../../lib/auth';
 import { getStore } from '../../lib/store';
 import { Button, Input, Select, Modal, Card, Spinner } from '../shared/UI';
 import {
@@ -351,8 +351,16 @@ export default function Finances() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tab, setTab] = useState<'revenues' | 'invoices' | 'stats' | 'raport-d' | 'raport-m' | 'raport-r' | 'all-time' | 'raport-w' | 'prognoza' | 'pogoda' | 'sezony'>('revenues');
+  type TabGroup = 'wpisy' | 'raporty' | 'analizy';
+  const TAB_GROUPS: { group: TabGroup; label: string; tabs: [typeof tab, string][] }[] = [
+    { group: 'wpisy', label: '📝 Wpisy', tabs: [['revenues', 'Przychody'], ['invoices', 'Faktury'], ['stats', 'Wykres']] },
+    { group: 'raporty', label: '📊 Raporty', tabs: [['raport-d', 'Dzień'], ['raport-w', 'Tydzień'], ['raport-m', 'Miesiąc'], ['raport-r', 'Rok'], ['all-time', 'Cały parking']] },
+    { group: 'analizy', label: '🔬 Analizy', tabs: [['prognoza', 'Prognoza'], ['pogoda', 'Pogoda'], ['sezony', 'Sezony']] },
+  ];
+  const activeGroup = TAB_GROUPS.find(g => g.tabs.some(([t]) => t === tab))?.group ?? 'wpisy';
   const [weekOffset, setWeekOffset] = useState(0);
-  const [selectedDayDate, setSelectedDayDate] = useState<string | null>(null);
+  // selectedDayDate used by DailyReport tab
+  const [selectedDayDate, _setSelectedDayDate] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportingOwner, setExportingOwner] = useState(false);
   const [commissionRateMain, setCommissionRateMain] = useState(0);
@@ -408,7 +416,8 @@ export default function Finances() {
   const totalInvestmentCosts  = invoices.filter(i => i.category === 'Inwestycja').reduce((s, i) => s + i.amount, 0);
   const totalCosts = invoices.reduce((s, i) => s + i.amount, 0);
   const profit = totalRevenue - totalCosts;
-  const totalCars = revenues.reduce((s, r) => s + (r.estimated_cars ?? 0), 0);
+  // totalCars available for future use
+  void revenues.reduce((s, r) => s + (r.estimated_cars ?? 0), 0);
   const roiRemaining = Math.max(0, totalInvestments - totalRevenueAllTime);
 
   const chartData = revenues.map(r => ({
@@ -444,13 +453,9 @@ export default function Finances() {
     setDeleteRevLoading(true);
     setDeleteRevError('');
     try {
-      const result = await verifyPassword(deleteRevPwd);
-      if (result.lockout) {
-        setDeleteRevError(`Zbyt wiele błędnych prób. Poczekaj ${result.lockout}s.`);
-        return;
-      }
-      if (!result.ok) {
-        setDeleteRevError('Nieprawidłowe hasło.');
+      const ok = await verifyCurrentPassword(deleteRevPwd);
+      if (!ok) {
+        setDeleteRevError('Nieprawidlowe haslo.');
         return;
       }
       await deleteDailyRevenue(deleteRevDate);
@@ -533,30 +538,38 @@ export default function Finances() {
         </Card>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-4 flex-shrink-0 flex-wrap">
-        {([
-          ['revenues', 'Przychody'],
-          ['invoices', 'Faktury'],
-          ['stats', 'Wykres'],
-          ['raport-d', 'Raport dnia'],
-          ['raport-w', '📅 Tydzień'],
-          ['raport-m', 'Raport mies.'],
-          ['raport-r', 'Raport roczny'],
-          ['all-time', '★ Parking cały'],
-          ['prognoza', '📈 Prognoza'],
-          ['pogoda', '🌤️ Pogoda'],
-          ['sezony', '📊 Sezony'],
-        ] as const).map(([t, label]) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors
-              ${tab === t ? 'bg-teal-500/20 text-teal-400 border border-teal-500/30' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
-          >
-            {label}
-          </button>
-        ))}
+      {/* Tab Groups */}
+      <div className="flex flex-col gap-2 mb-4 flex-shrink-0">
+        {/* Main group buttons */}
+        <div className="flex gap-1">
+          {TAB_GROUPS.map(g => (
+            <button
+              key={g.group}
+              onClick={() => setTab(g.tabs[0][0])}
+              className={`px-5 py-2 rounded-lg text-sm font-semibold transition-colors
+                ${activeGroup === g.group
+                  ? 'bg-slate-700 text-white border border-slate-600'
+                  : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'}`}
+            >
+              {g.label}
+            </button>
+          ))}
+        </div>
+        {/* Sub-tabs for active group */}
+        <div className="flex gap-1 pl-1">
+          {TAB_GROUPS.find(g => g.group === activeGroup)!.tabs.map(([t, label]) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-3.5 py-1.5 rounded-md text-xs font-medium transition-colors
+                ${tab === t
+                  ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)] border border-[var(--color-accent-border)]'
+                  : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto min-h-0">

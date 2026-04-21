@@ -1,4 +1,3 @@
-import React from 'react';
 import { DailyRevenue } from '../../lib/database';
 import { Card } from '../shared/UI';
 import {

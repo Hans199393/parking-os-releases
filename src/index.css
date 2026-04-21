@@ -10,7 +10,9 @@
   --color-text: #0f172a;
   --color-text-muted: #64748b;
   --color-muted: #64748b;
-  --color-accent: #4dbfbf;
+  --color-accent: #2dd4bf;
+  --color-accent-bg: color-mix(in srgb, var(--color-accent) 15%, transparent);
+  --color-accent-border: color-mix(in srgb, var(--color-accent) 30%, transparent);
   --color-accent-dark: #1a2d4a;
   --color-orange: #e8622a;
   --color-yellow: #f5c842;

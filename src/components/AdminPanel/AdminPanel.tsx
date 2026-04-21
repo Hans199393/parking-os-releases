@@ -324,7 +324,7 @@ export default function AdminPanel() {
             src={adminUrl}
             className="w-full h-full border-0"
             title="Panel CMS"
-            sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads"
+            sandbox="allow-scripts allow-forms allow-popups allow-modals allow-downloads allow-same-origin"
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-8">

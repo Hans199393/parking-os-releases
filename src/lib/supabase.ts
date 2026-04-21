@@ -179,9 +179,9 @@ export async function getConfig(key: string): Promise<string | null> {
 
 export async function setConfig(key: string, value: string): Promise<void> {
   const sb = await getSupabaseClient();
-  const { error } = await sb
+  const { error } = await (sb as SupabaseClient)
     .from('settings' as never)
-    .upsert({ key, value }, { onConflict: 'key' });
+    .upsert({ key, value } as never, { onConflict: 'key' });
   if (error) throw error;
 }
 
@@ -488,4 +488,94 @@ export async function isExtraOpenDay(dateIso: string): Promise<boolean> {
     .eq('active', true)
     .maybeSingle();
   return !!data;
+}
+
+// ---------------------------------------------------------------------------
+// Bot alerts (alerty systemowe — np. wyczerpanie limitu Groq)
+// ---------------------------------------------------------------------------
+
+export interface BotAlert {
+  id: number;
+  type: string;
+  message: string | null;
+  resolved: boolean;
+  created_at: string;
+}
+
+export async function getBotAlerts(onlyUnresolved = true): Promise<BotAlert[]> {
+  const sb = await getSupabaseClient();
+  const base = (sb as SupabaseClient)
+    .from('bot_alerts')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(10);
+  const { data, error } = onlyUnresolved
+    ? await base.eq('resolved', false)
+    : await base;
+  if (error) throw error;
+  return (data ?? []) as BotAlert[];
+}
+
+export async function resolveBotAlert(id: number): Promise<void> {
+  const sb = await getSupabaseClient();
+  const { error } = await (sb as SupabaseClient)
+    .from('bot_alerts')
+    .update({ resolved: true })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+// ─── Admin logs ─────────────────────────────────────────────────────────────
+
+export interface AdminLog {
+  id: number;
+  category: 'session' | 'action' | 'camera' | 'bot' | 'system';
+  action: string;
+  description: string | null;
+  user_email: string | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+}
+
+export async function writeAdminLog(
+  category: AdminLog['category'],
+  action: string,
+  description?: string,
+  metadata?: Record<string, unknown>
+): Promise<void> {
+  try {
+    const sb = await getSupabaseClient();
+    const userResult = await (sb as SupabaseClient).auth.getUser();
+    const user = userResult.data?.user ?? null;
+    await (sb as SupabaseClient)
+      .from('admin_logs')
+      .insert({
+        category,
+        action,
+        description: description ?? null,
+        user_email: user?.email ?? null,
+        metadata: metadata ?? null,
+      });
+  } catch { /* logi nigdy nie przerywają działania aplikacji */ }
+}
+
+export async function getAdminLogs(
+  category?: AdminLog['category'],
+  limit = 200
+): Promise<AdminLog[]> {
+  try {
+    const sb = await getSupabaseClient();
+    const base = (sb as SupabaseClient)
+      .from('admin_logs')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    const { data, error } = category
+      ? await base.eq('category', category)
+      : await base;
+    if (error) return [];
+    return (data ?? []) as AdminLog[];
+  } catch {
+    return [];
+  }
 }

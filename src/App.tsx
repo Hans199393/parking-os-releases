@@ -10,9 +10,14 @@ import AdminPanel from './components/AdminPanel/AdminPanel';
 import Settings from './components/Settings/Settings';
 import Chat from './components/Chat/Chat';
 import Email from './components/Email/Email';
-import { startPolling, stopPolling } from './lib/notifications';
+import Logs from './components/Logs/Logs';
+import { startPolling, stopPolling, startChatPolling, stopChatPolling } from './lib/notifications';
 import { scheduleDailyBackup } from './lib/backup';
+import { logPageView, logLogout } from './lib/logger';
 import { getStore } from './lib/store';
+import { applyAccentColor, ACCENT_COLORS } from './components/Settings/Settings';
+import { signOut } from './lib/auth';
+import { getCurrentUser, type AppUser } from './lib/session';
 import './index.css';
 
 type Theme = 'light' | 'dark' | 'system';
@@ -35,10 +40,12 @@ export default function App() {
   const [authenticated, setAuthenticated] = useState<boolean>(() => {
     return sessionStorage.getItem('parking_os_authed') === '1';
   });
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => getCurrentUser());
   const [page, setPage] = useState<Page>(() => {
     return (sessionStorage.getItem('parking_os_page') as Page) ?? 'dashboard';
   });
   const [reservationBadge, setReservationBadge] = useState(0);
+  const [chatBadge, setChatBadge] = useState(0);
   const [theme, setTheme] = useState<Theme>('dark');
   const [pwaStatus, setPwaStatus] = useState<'stopped' | 'starting' | 'running'>('stopped');
 
@@ -77,6 +84,12 @@ export default function App() {
       const t = savedTheme ?? 'dark';
       setTheme(t);
       applyTheme(t);
+      // Accent color
+      const ac = await store.get<string>('accent_color');
+      if (ac) {
+        const found = ACCENT_COLORS.find(c => c.id === ac);
+        if (found) applyAccentColor(found.hex);
+      }
     });
     loadCameraUrls();
   }, [loadCameraUrls]);
@@ -92,10 +105,24 @@ export default function App() {
   const handleAuth = useCallback(() => {
     sessionStorage.setItem('parking_os_authed', '1');
     setAuthenticated(true);
+    setCurrentUser(getCurrentUser());
     startPolling((_res) => {
       setReservationBadge(b => b + 1);
     });
+    startChatPolling((_msg) => {
+      setChatBadge(b => b + 1);
+    });
     scheduleDailyBackup();
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    logLogout(currentUser?.email);
+    await signOut();
+    sessionStorage.removeItem('parking_os_authed');
+    stopPolling();
+    stopChatPolling();
+    setAuthenticated(false);
+    setCurrentUser(null);
   }, []);
 
   const handleOpenPwa = useCallback(async () => {
@@ -143,12 +170,14 @@ export default function App() {
   const handleNavigate = (p: Page) => {
     sessionStorage.setItem('parking_os_page', p);
     setPage(p);
+    logPageView(p);
     if (p === 'reservations') setReservationBadge(0);
+    if (p === 'chat') setChatBadge(0);
   };
 
   useEffect(() => {
-    return () => { stopPolling(); };
-  }, []);
+    return () => { stopPolling(); stopChatPolling(); };
+  }, []);;
 
   if (!authenticated) {
     return <Login onSuccess={handleAuth} />;
@@ -160,9 +189,12 @@ export default function App() {
         current={page}
         onChange={handleNavigate}
         reservationBadge={reservationBadge}
+        chatBadge={chatBadge}
         onOpenPwa={handleOpenPwa}
         onStopPwa={handleStopPwa}
         pwaStatus={pwaStatus}
+        user={currentUser}
+        onLogout={handleLogout}
       />
       <main className="flex-1 overflow-hidden relative backdrop-blur-md bg-[var(--color-bg)]">
         {page === 'dashboard' && (
@@ -206,8 +238,11 @@ export default function App() {
         {page === 'email' && (
           <Email />
         )}
+        {page === 'logs' && (
+          <Logs />
+        )}
         {page === 'settings' && (
-          <Settings theme={theme} onThemeChange={handleThemeChange} onSettingsSaved={loadCameraUrls} />
+          <Settings theme={theme} onThemeChange={handleThemeChange} onSettingsSaved={loadCameraUrls} user={currentUser} />
         )}
       </main>
     </div>

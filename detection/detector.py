@@ -30,39 +30,54 @@ from ultralytics import YOLO
 # ── Konfiguracja ──────────────────────────────────────────────────────────────
 VEHICLE_CLASSES = {2: 'car', 5: 'bus', 7: 'truck'}   # COCO class IDs
 CONF_THRESHOLD  = 0.35
-SAMPLE_INTERVAL = 1.0      # sekund między klatkami (1 fps)
-MAX_DISAPPEARED = 6        # klatek nieobecności przed usunięciem śladu
-MAX_DISTANCE    = 120      # piksele — maks odległość do przypisania śladu
+SAMPLE_INTERVAL = 0.33     # sekund między klatkami (~3 fps) — szybszy sampling dla bramy
+MAX_DISAPPEARED = 10       # klatek nieobecności przed usunięciem śladu
+MAX_DISTANCE    = 250      # piksele — maks odległość do przypisania śladu (zwiększone dla 3fps)
 
 # ── Centroid Tracker ──────────────────────────────────────────────────────────
 class CentroidTracker:
     def __init__(self):
-        self.next_id    = 0
-        self.objects    = {}       # id → (cx, cy)
-        self.disappeared = {}      # id → liczba klatek bez detekcji
+        self.next_id     = 0
+        self.objects     = {}       # id → (cx, cy)
+        self.disappeared = {}       # id → liczba klatek bez detekcji
+        self.first_y     = {}       # id → y przy pierwszym wykryciu
+        self.last_y      = {}       # id → y przy ostatnim wykryciu
 
     def _register(self, centroid):
         self.objects[self.next_id]     = centroid
         self.disappeared[self.next_id] = 0
+        self.first_y[self.next_id]     = centroid[1]
+        self.last_y[self.next_id]      = centroid[1]
         self.next_id += 1
 
     def _deregister(self, obj_id):
+        """Usuwa ślad i zwraca (first_y, last_y) dla późniejszego sprawdzenia przekroczenia."""
+        fy = self.first_y.pop(obj_id, None)
+        ly = self.last_y.pop(obj_id, self.objects[obj_id][1])
         del self.objects[obj_id]
         del self.disappeared[obj_id]
+        return fy, ly
 
     def update(self, centroids):
-        """Zwraca dict {id: (old_centroid, new_centroid)} dla zaktualizowanych śladów."""
+        """
+        Zwraca:
+          matches   — dict {id: (old_centroid, new_centroid)} dla zaktualizowanych śladów
+          gone      — list[(obj_id, first_y, last_y)] śladów właśnie usuniętych
+        """
+        gone = []
+
         if not centroids:
             for oid in list(self.disappeared):
                 self.disappeared[oid] += 1
                 if self.disappeared[oid] > MAX_DISAPPEARED:
-                    self._deregister(oid)
-            return {}
+                    fy, ly = self._deregister(oid)
+                    gone.append((oid, fy, ly))
+            return {}, gone
 
         if not self.objects:
             for c in centroids:
                 self._register(c)
-            return {}
+            return {}, gone
 
         obj_ids       = list(self.objects.keys())
         obj_centroids = list(self.objects.values())
@@ -78,7 +93,7 @@ class CentroidTracker:
         matches   = {}
 
         for _ in range(min(len(obj_centroids), len(centroids))):
-            idx    = int(np.argmin(D))
+            idx      = int(np.argmin(D))
             row, col = divmod(idx, D.shape[1])
             if row in used_rows or col in used_cols or D[row, col] > MAX_DISTANCE:
                 D[row, col] = 1e9
@@ -86,6 +101,7 @@ class CentroidTracker:
             oid = obj_ids[row]
             matches[oid]          = (self.objects[oid], centroids[col])
             self.objects[oid]     = centroids[col]
+            self.last_y[oid]      = centroids[col][1]   # aktualizuj last_y
             self.disappeared[oid] = 0
             used_rows.add(row)
             used_cols.add(col)
@@ -96,13 +112,14 @@ class CentroidTracker:
                 oid = obj_ids[row]
                 self.disappeared[oid] += 1
                 if self.disappeared[oid] > MAX_DISAPPEARED:
-                    self._deregister(oid)
+                    fy, ly = self._deregister(oid)
+                    gone.append((oid, fy, ly))
 
         for col in range(len(centroids)):
             if col not in used_cols:
                 self._register(centroids[col])
 
-        return matches
+        return matches, gone
 
 
 # ── SQLite ────────────────────────────────────────────────────────────────────
@@ -227,7 +244,7 @@ def main():
 
     roi_parts = [float(x) for x in args.roi.split(',')]
     tracker   = CentroidTracker()
-    crossed   = set()   # IDs które już przekroczyły linię (reset przy utracie śladu)
+    counted   = set()   # IDs które zostały już zliczone (zapobiega podwójnemu liczeniu)
 
     cap             = None
     reconnect_delay = 5
@@ -283,33 +300,55 @@ def main():
                 cy = int((by1 + by2) / 2)
                 centroids.append((cx, cy))
 
-        # ── Śledzenie + detekcja przekroczenia linii ──
-        matches = tracker.update(centroids)
+        # ── Śledzenie ──
+        matches, gone = tracker.update(centroids)
 
+        # ── Metoda 1: detekcja mid-track (pojazd wolno poruszający się) ──
+        # Wykrywa przekroczenie linii między dwoma kolejnymi klatkami.
         for obj_id, (old_c, new_c) in matches.items():
+            if obj_id in counted:
+                continue
             old_y, new_y = old_c[1], new_c[1]
-            if obj_id not in crossed:
-                # Wjazd: ruch w dół (w kierunku parkingu)
-                if old_y < line_y <= new_y:
-                    crossed.add(obj_id)
-                    record_crossing(conn, 'in')
-                    state['today_in']   += 1
-                    state['on_parking']  = max(0, state['today_in'] - state['today_out'])
-                    state['last_event']  = {'direction': 'in',  'ts': datetime.now().isoformat()}
-                    print(f'[detector] >>> WJAZD #{state["today_in"]}', flush=True)
-                # Wyjazd: ruch w górę (z parkingu)
-                elif old_y >= line_y > new_y:
-                    crossed.add(obj_id)
-                    record_crossing(conn, 'out')
-                    state['today_out']  += 1
-                    state['on_parking']  = max(0, state['today_in'] - state['today_out'])
-                    state['last_event']  = {'direction': 'out', 'ts': datetime.now().isoformat()}
-                    print(f'[detector] <<< WYJAZD #{state["today_out"]}', flush=True)
+            if old_y < line_y <= new_y:
+                counted.add(obj_id)
+                record_crossing(conn, 'in')
+                state['today_in']   += 1
+                state['on_parking']  = max(0, state['today_in'] - state['today_out'])
+                state['last_event']  = {'direction': 'in',  'ts': datetime.now().isoformat()}
+                print(f'[detector] >>> WJAZD (mid) #{state["today_in"]}', flush=True)
+            elif old_y >= line_y > new_y:
+                counted.add(obj_id)
+                record_crossing(conn, 'out')
+                state['today_out']  += 1
+                state['on_parking']  = max(0, state['today_in'] - state['today_out'])
+                state['last_event']  = {'direction': 'out', 'ts': datetime.now().isoformat()}
+                print(f'[detector] <<< WYJAZD (mid) #{state["today_out"]}', flush=True)
 
-        # Usuń z crossed ślady których już nie ma
-        crossed &= set(tracker.objects.keys())
+        # ── Metoda 2: detekcja na podstawie trajektorii (szybkie pojazdy) ──
+        # Gdy ślad znika, sprawdzamy czy w trakcie swojego życia przekroczył linię
+        # (first_y po jednej stronie, last_y po drugiej). Działa nawet gdy auto
+        # przejeżdżało tak szybko, że nigdy nie było widoczne na obu stronach linii
+        # w tym samym kroku.
+        for obj_id, first_y, last_y in gone:
+            counted.discard(obj_id)   # zwolnij slot gdy ślad znika
+            if first_y is None:
+                continue
+            # Sprawdź czy trajektoria przeszła przez linię
+            crossed_down = first_y < line_y and last_y >= line_y   # wjazd
+            crossed_up   = first_y >= line_y and last_y < line_y   # wyjazd
+            if crossed_down or crossed_up:
+                direction = 'in' if crossed_down else 'out'
+                record_crossing(conn, direction)
+                if direction == 'in':
+                    state['today_in']  += 1
+                    print(f'[detector] >>> WJAZD (trajektoria) #{state["today_in"]}', flush=True)
+                else:
+                    state['today_out'] += 1
+                    print(f'[detector] <<< WYJAZD (trajektoria) #{state["today_out"]}', flush=True)
+                state['on_parking'] = max(0, state['today_in'] - state['today_out'])
+                state['last_event'] = {'direction': direction, 'ts': datetime.now().isoformat()}
 
-        # ── Sleep do 1 fps ──
+        # ── Sleep do ~3 fps ──
         elapsed    = time.time() - t0
         sleep_time = max(0.0, SAMPLE_INTERVAL - elapsed)
         time.sleep(sleep_time)

@@ -1,8 +1,9 @@
 ﻿import { useState, useEffect, useRef, useCallback } from 'react';
 import RTSPPlayer from './RTSPPlayer';
 import { invoke } from '@tauri-apps/api/core';
-import DetectorPanel from './DetectorPanel';
-import { Maximize2, Minimize2, RefreshCw, Copy, Play, Image, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Home } from 'lucide-react';
+import DetectorPanel, { type Roi } from './DetectorPanel';
+import { Maximize2, Minimize2, RefreshCw, Copy, Play, Image, Move, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Home, LayoutGrid, LayoutPanelLeft, List } from 'lucide-react';
+import { getStore } from '../../lib/store';
 
 type CameraMode = 'snapshot' | 'hls';
 
@@ -16,7 +17,7 @@ function PTZBtn({ onClick, children, className = '' }: {
     <button
       onClick={onClick}
       className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all select-none touch-none
-        bg-slate-800/90 hover:bg-slate-700 active:bg-teal-600 active:scale-95
+        bg-slate-800/90 hover:bg-slate-700 active:bg-[var(--color-accent)] active:scale-95
         text-slate-300 hover:text-white border border-slate-600/40 ${className}`}
       draggable={false}
     >
@@ -96,15 +97,19 @@ interface CameraFeedProps {
   fullscreen: boolean;
   onFullscreen: () => void;
   onExitFullscreen: () => void;
+  roiOverlay?: { roi: Roi; line: number } | null;
+  /** Slot renderowany jako pasek u dołu karty (tryb compact DetectorPanel) */
+  bottomBar?: React.ReactNode;
 }
 
-function CameraFeed({ name, camId, ptzEnabled = false, snapshotUrl, rtspUrl, hlsUrl, fullscreen, onFullscreen, onExitFullscreen }: CameraFeedProps) {
+function CameraFeed({ name, camId, ptzEnabled = false, snapshotUrl, rtspUrl, hlsUrl, fullscreen, onFullscreen, onExitFullscreen, roiOverlay, bottomBar }: CameraFeedProps) {
   const [imgData, setImgData] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [mode, setMode] = useState<CameraMode>(hlsUrl ? 'hls' : 'snapshot');
   const cancelRef = useRef(false);
+
   const [ptzOpen, setPtzOpen] = useState(false);
 
   // Snapshot polling loop
@@ -158,113 +163,145 @@ function CameraFeed({ name, camId, ptzEnabled = false, snapshotUrl, rtspUrl, hls
   const connected = mode === 'snapshot' ? (!!imgData && !error) : !!hlsUrl;
 
   return (
-    <div className={`relative bg-black rounded-xl overflow-hidden border border-slate-700 group ${fullscreen ? 'h-full' : 'aspect-video'}`}>
-      {/* Label + status */}
-      <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5">
-        <span className={`inline-block w-2 h-2 rounded-full ${connected ? 'bg-green-400 animate-pulse' : loading ? 'bg-yellow-400 animate-pulse' : 'bg-red-500'}`} />
-        <span className="text-xs text-white bg-black/60 px-2 py-0.5 rounded font-medium">{name}</span>
-      </div>
+    <div className={`flex flex-col bg-black rounded-xl overflow-hidden border border-slate-700 group absolute inset-0`}>
+      {/* Video area — flex-1 fills remaining height */}
+      <div className="relative flex-1 min-h-0">
+        {/* Label + status */}
+        <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5">
+          <span className={`inline-block w-2 h-2 rounded-full ${connected ? 'bg-green-400 animate-pulse' : loading ? 'bg-yellow-400 animate-pulse' : 'bg-red-500'}`} />
+          <span className="text-xs text-white bg-black/60 px-2 py-0.5 rounded font-medium">{name}</span>
+        </div>
 
-      {/* Controls */}
-      <div className={`absolute top-2 right-2 z-10 flex gap-1 transition-opacity ${ptzOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
-        {/* Mode toggle */}
-        {snapshotUrl && hlsUrl && (
-          <button
-            onClick={() => setMode(m => m === 'snapshot' ? 'hls' : 'snapshot')}
+        {/* Controls */}
+        <div className={`absolute top-2 right-2 z-10 flex gap-1 transition-opacity ${ptzOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
+          {snapshotUrl && hlsUrl && (
+            <button onClick={() => setMode(m => m === 'snapshot' ? 'hls' : 'snapshot')}
+              className="bg-black/60 text-white p-1.5 rounded hover:bg-black/80"
+              title={mode === 'snapshot' ? 'Przełącz na HLS Live' : 'Przełącz na Snapshot'}>
+              {mode === 'snapshot' ? <Play size={14} /> : <Image size={14} />}
+            </button>
+          )}
+          {mode === 'snapshot' && snapshotUrl && (
+            <button onClick={refresh} className="bg-black/60 text-white p-1.5 rounded hover:bg-black/80" title="Odśwież">
+              <RefreshCw size={14} />
+            </button>
+          )}
+          {ptzEnabled && (
+            <button onClick={() => setPtzOpen(p => !p)}
+              className={`p-1.5 rounded hover:bg-black/80 transition-colors ${ptzOpen ? 'bg-[var(--color-accent)] text-white' : 'bg-black/60 text-white'}`}
+              title="Sterowanie PTZ">
+              <Move size={14} />
+            </button>
+          )}
+          <button onClick={fullscreen ? onExitFullscreen : onFullscreen}
             className="bg-black/60 text-white p-1.5 rounded hover:bg-black/80"
-            title={mode === 'snapshot' ? 'Przełącz na HLS Live' : 'Przełącz na Snapshot'}
-          >
-            {mode === 'snapshot' ? <Play size={14} /> : <Image size={14} />}
+            title={fullscreen ? 'Zmniejsz' : 'Pełny ekran'}>
+            {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
+        </div>
+
+        {/* PTZ Panel */}
+        {ptzEnabled && ptzOpen && (
+          <div className="absolute bottom-2 right-2 z-20">
+            <PTZControls camId={camId} />
+          </div>
         )}
-        {mode === 'snapshot' && snapshotUrl && (
-          <button onClick={refresh} className="bg-black/60 text-white p-1.5 rounded hover:bg-black/80" title="Odśwież">
-            <RefreshCw size={14} />
-          </button>
+
+        {/* HLS Mode */}
+        {mode === 'hls' && hlsUrl && (
+          <div className="absolute inset-0">
+            <RTSPPlayer streamUrl={hlsUrl} fill />
+          </div>
         )}
-        {ptzEnabled && (
-          <button
-            onClick={() => setPtzOpen(p => !p)}
-            className={`p-1.5 rounded hover:bg-black/80 transition-colors ${ptzOpen ? 'bg-teal-600/90 text-white' : 'bg-black/60 text-white'}`}
-            title="Sterowanie PTZ"
-          >
-            <Move size={14} />
-          </button>
+
+        {/* Snapshot Mode */}
+        {mode === 'snapshot' && imgData && !error && (
+          <img
+            src={imgData}
+            alt={name}
+            className="absolute inset-0 w-full h-full object-cover"
+            onError={() => setError('Kamera zwrocila nieprawidlowy obraz. Sprawdz Snapshot URL w Ustawieniach.')}
+          />
         )}
-        <button
-          onClick={fullscreen ? onExitFullscreen : onFullscreen}
-          className="bg-black/60 text-white p-1.5 rounded hover:bg-black/80"
-          title={fullscreen ? 'Zmniejsz' : 'Pełny ekran'}
-        >
-          {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-        </button>
+
+        {/* ROI overlay — viewBox matches editor's 640×360 canonical space;
+             preserveAspectRatio=xMidYMid slice mirrors CSS object-cover exactly */}
+        {roiOverlay && (() => {
+          const { roi, line } = roiOverlay;
+          const W = 640, H = 360;
+          const rx1 = roi.x1 * W, ry1 = roi.y1 * H;
+          const rx2 = roi.x2 * W, ry2 = roi.y2 * H;
+          const lineY = ry1 + line * (ry2 - ry1);
+          return (
+            <svg
+              className="absolute inset-0 w-full h-full pointer-events-none z-10"
+              viewBox={`0 0 ${W} ${H}`}
+              preserveAspectRatio="xMidYMid slice"
+            >
+              <rect
+                x={rx1} y={ry1} width={rx2 - rx1} height={ry2 - ry1}
+                fill="rgba(239,68,68,0.18)" stroke="rgba(239,68,68,0.85)"
+                strokeWidth={2} strokeDasharray="8 4"
+              />
+              <line
+                x1={rx1} y1={lineY} x2={rx2} y2={lineY}
+                stroke="rgba(251,191,36,0.9)" strokeWidth={2}
+              />
+              <text
+                x={rx1 + 6} y={Math.max(ry1 - 5, 14)}
+                fill="rgba(239,68,68,0.9)" fontSize={13} fontFamily="sans-serif" fontWeight="600"
+              >ROI</text>
+            </svg>
+          );
+        })()}
+
+        {/* No source configured */}
+        {!hasAnySource && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">
+            <div className="text-3xl">📷</div>
+            <p className="text-slate-400 text-sm font-medium">{name}</p>
+            {rtspUrl ? (
+              <div className="max-w-xs">
+                <p className="text-amber-400 text-xs font-semibold mb-1">Skonfiguruj kamere w Ustawieniach</p>
+                <p className="text-slate-500 text-xs mb-2">Wpisz Snapshot HTTP URL lub HLS URL.</p>
+                <div className="bg-slate-800 rounded px-2 py-1 flex items-center gap-1 justify-between">
+                  <span className="text-slate-400 text-xs truncate max-w-[160px]">{rtspUrl}</span>
+                  <button onClick={copyRtsp} className="text-[var(--color-accent)] hover:opacity-80 flex-shrink-0" title="Kopiuj RTSP">
+                    <Copy size={12} />
+                  </button>
+                </div>
+                {copied && <p className="text-[var(--color-accent)] text-xs mt-1">Skopiowano do schowka</p>}
+              </div>
+            ) : (
+              <p className="text-slate-600 text-xs">Wpisz URL kamery w Ustawieniach</p>
+            )}
+          </div>
+        )}
+
+        {/* Snapshot loading */}
+        {mode === 'snapshot' && snapshotUrl && loading && !imgData && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+            <div className="w-8 h-8 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin" />
+            <p className="text-slate-400 text-xs">Łączenie z kamerą...</p>
+          </div>
+        )}
+
+        {/* Snapshot error */}
+        {mode === 'snapshot' && snapshotUrl && error && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">
+            <div className="text-3xl">⚠️</div>
+            <p className="text-slate-400 text-sm">Brak odpowiedzi kamery</p>
+            <p className="text-slate-600 text-xs break-all max-w-xs">{error}</p>
+            <button onClick={refresh} className="mt-1 text-xs text-[var(--color-accent)] hover:underline">Spróbuj ponownie</button>
+            {hlsUrl && (
+              <button onClick={() => setMode('hls')} className="mt-1 text-xs text-amber-400 hover:underline">Przełącz na HLS Live →</button>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* PTZ Panel */}
-      {ptzEnabled && ptzOpen && (
-        <div className="absolute bottom-2 right-2 z-20">
-          <PTZControls camId={camId} />
-        </div>
-      )}
-
-      {/* HLS Mode */}
-      {mode === 'hls' && hlsUrl && (
-        <RTSPPlayer streamUrl={hlsUrl} />
-      )}
-
-      {/* Snapshot Mode — image */}
-      {mode === 'snapshot' && imgData && !error && (
-        <img
-          src={imgData}
-          alt={name}
-          className="w-full h-full object-cover"
-          onError={() => setError('Kamera zwróciła nieprawidłowy obraz. Sprawdź Snapshot URL w Ustawieniach.')}
-        />
-      )}
-
-      {/* No source configured */}
-      {!hasAnySource && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">
-          <div className="text-3xl">📷</div>
-          <p className="text-slate-400 text-sm font-medium">{name}</p>
-          {rtspUrl ? (
-            <div className="max-w-xs">
-              <p className="text-amber-400 text-xs font-semibold mb-1">Skonfiguruj kamerę w Ustawieniach</p>
-              <p className="text-slate-500 text-xs mb-2">Wpisz Snapshot HTTP URL lub HLS URL (po uruchomieniu proxy ffmpeg).</p>
-              <div className="bg-slate-800 rounded px-2 py-1 flex items-center gap-1 justify-between">
-                <span className="text-slate-400 text-xs truncate max-w-[160px]">{rtspUrl}</span>
-                <button onClick={copyRtsp} className="text-teal-400 hover:text-teal-300 flex-shrink-0" title="Kopiuj RTSP do VLC">
-                  <Copy size={12} />
-                </button>
-              </div>
-              {copied && <p className="text-teal-400 text-xs mt-1">Skopiowano do schowka</p>}
-            </div>
-          ) : (
-            <p className="text-slate-600 text-xs">Wpisz URL kamery w Ustawieniach</p>
-          )}
-        </div>
-      )}
-
-      {/* Snapshot loading */}
-      {mode === 'snapshot' && snapshotUrl && loading && !imgData && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-          <div className="w-8 h-8 border-2 border-teal-400 border-t-transparent rounded-full animate-spin" />
-          <p className="text-slate-400 text-xs">Łączenie z kamerą...</p>
-        </div>
-      )}
-
-      {/* Snapshot error */}
-      {mode === 'snapshot' && snapshotUrl && error && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">
-          <div className="text-3xl">⚠️</div>
-          <p className="text-slate-400 text-sm">Brak odpowiedzi kamery</p>
-          <p className="text-slate-600 text-xs break-all max-w-xs">{error}</p>
-          <button onClick={refresh} className="mt-1 text-xs text-teal-400 hover:underline">Spróbuj ponownie</button>
-          {hlsUrl && (
-            <button onClick={() => setMode('hls')} className="mt-1 text-xs text-amber-400 hover:underline">Przełącz na HLS Live →</button>
-          )}
-        </div>
-      )}
+      {/* Bottom bar slot — np. DetectorPanel compact */}
+      {bottomBar}
     </div>
   );
 }
@@ -286,6 +323,26 @@ interface CamerasProps {
 
 export default function Cameras({ cam1SnapshotUrl, cam1RtspUrl, cam1HlsUrl, cam2SnapshotUrl, cam2RtspUrl, cam2HlsUrl, cam3SnapshotUrl, cam3RtspUrl, cam3HlsUrl, cam4SnapshotUrl, cam4RtspUrl, cam4HlsUrl }: CamerasProps) {
   const [fullscreenCam, setFullscreenCam] = useState<number | null>(null);
+  const [roiOverlay, setRoiOverlay] = useState<{ roi: Roi; line: number } | null>(null);
+  const [showRoiOverlay, setShowRoiOverlay] = useState(true);
+
+  // Wczytaj ustawienie show_roi_overlay ze store
+  useEffect(() => {
+    getStore().then(async s => {
+      const v = await s.get<string>('show_roi_overlay');
+      setShowRoiOverlay(v !== 'false');
+    }).catch(() => {});
+  }, []);
+
+  // layout: 'grid2x2' | 'big1' | 'list'
+  const [layout, setLayout] = useState<'grid2x2' | 'big1' | 'list'>(() => {
+    return (sessionStorage.getItem('cam_layout') as 'grid2x2' | 'big1' | 'list') ?? 'grid2x2';
+  });
+
+  const setLayoutSave = (l: 'grid2x2' | 'big1' | 'list') => {
+    setLayout(l);
+    sessionStorage.setItem('cam_layout', l);
+  };
 
   const cameras = [
     { name: 'CAM 1 — IMOU', camId: 'cam1', ptzEnabled: false, snapshotUrl: cam1SnapshotUrl, rtspUrl: cam1RtspUrl, hlsUrl: cam1HlsUrl },
@@ -296,83 +353,124 @@ export default function Cameras({ cam1SnapshotUrl, cam1RtspUrl, cam1HlsUrl, cam2
 
   const anyConfigured = cameras.some(c => c.snapshotUrl || c.hlsUrl || c.rtspUrl);
 
+  // DetectorPanel kompaktowy — do wbudowania w kartę CAM 1
+  const detectorBar = (
+    <DetectorPanel compact
+      cam1RtspUrl={cam1RtspUrl}
+      cam1SnapshotUrl={cam1SnapshotUrl}
+      cam1HlsUrl={cam1HlsUrl}
+      onRoiUpdate={(roi, line) => setRoiOverlay({ roi, line })}
+    />
+  );
+
+  function renderCamera(cam: typeof cameras[0], i: number, fs: boolean) {
+    return (
+      <CameraFeed
+        key={cam.camId}
+        name={cam.name}
+        camId={cam.camId}
+        ptzEnabled={cam.ptzEnabled}
+        snapshotUrl={cam.snapshotUrl}
+        rtspUrl={cam.rtspUrl}
+        hlsUrl={cam.hlsUrl}
+        fullscreen={fs}
+        onFullscreen={() => setFullscreenCam(i)}
+        onExitFullscreen={() => setFullscreenCam(null)}
+        roiOverlay={i === 0 && showRoiOverlay ? roiOverlay : null}
+        bottomBar={i === 0 ? detectorBar : undefined}
+      />
+    );
+  }
+
   return (
-    <div className="p-6 h-full flex flex-col">
-      <div className="mb-5">
-        <h1 className="text-2xl font-bold text-[var(--color-text)]">Kamery</h1>
-        <p className="text-[var(--color-text-muted)] text-sm mt-1">
-          {anyConfigured
-            ? 'Podgląd na żywo — Snapshot (~1,5 kl/s) lub HLS (pełny live)'
-            : 'Skonfiguruj adresy kamer w Ustawieniach'}
-        </p>
+    <div className="p-4 h-full flex flex-col gap-3">
+      {/* Nagłówek */}
+      <div className="flex items-center justify-between flex-shrink-0">
+        <div>
+          <h1 className="text-xl font-bold text-[var(--color-text)]">Kamery</h1>
+          <p className="text-[var(--color-text-muted)] text-xs mt-0.5">
+            {anyConfigured ? 'Snapshot (~1,5 kl/s) lub HLS live' : 'Skonfiguruj adresy kamer w Ustawieniach'}
+          </p>
+        </div>
+        {/* Przełączniki layoutu */}
+        {fullscreenCam === null && (
+          <div className="flex items-center gap-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-1">
+            <button onClick={() => setLayoutSave('grid2x2')} title="Siatka 2×2"
+              className={`p-1.5 rounded transition-colors ${layout === 'grid2x2' ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]' : 'text-slate-400 hover:text-slate-200'}`}>
+              <LayoutGrid size={15} />
+            </button>
+            <button onClick={() => setLayoutSave('big1')} title="1 duży + 3 małe"
+              className={`p-1.5 rounded transition-colors ${layout === 'big1' ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]' : 'text-slate-400 hover:text-slate-200'}`}>
+              <LayoutPanelLeft size={15} />
+            </button>
+            <button onClick={() => setLayoutSave('list')} title="Lista pozioma"
+              className={`p-1.5 rounded transition-colors ${layout === 'list' ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]' : 'text-slate-400 hover:text-slate-200'}`}>
+              <List size={15} />
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Setup instructions if no cameras configured */}
-      {/* Detector Panel — zawsze widoczny nad kamerami */}
-      <DetectorPanel cam1RtspUrl={cam1RtspUrl} />
-
+      {/* Instrukcja gdy brak kamer */}
       {!anyConfigured && (
-        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6 mb-6">
-          <h3 className="text-amber-400 font-semibold text-sm mb-3">Jak uruchomić podgląd kamer?</h3>
-          <div className="text-slate-400 text-xs space-y-2">
-            <p><strong className="text-slate-300">Opcja 1 — Snapshot HTTP (najprostsze):</strong></p>
-            <p className="pl-4">Jeśli kamera obsługuje HTTP snapshot, wpisz URL w Ustawieniach (np. <code className="text-slate-300">http://admin:haslo@IP/cgi-bin/snapshot.cgi</code>).</p>
-            <p className="mt-2"><strong className="text-slate-300">Opcja 2 — HLS Live stream (wymaga ffmpeg):</strong></p>
-            <ol className="pl-4 space-y-1 list-decimal list-inside">
-              <li>Zainstaluj <code className="text-slate-300">ffmpeg</code> (dodaj do PATH)</li>
-              <li>W folderze <code className="text-slate-300">parking_os/rtsp-proxy</code> uruchom: <code className="text-slate-300">npm install &amp;&amp; node server.js</code></li>
-              <li>W Ustawieniach wpisz HLS URL: <code className="text-slate-300">http://localhost:8888/stream/cam1.m3u8</code></li>
-            </ol>
-            <p className="mt-2"><strong className="text-slate-300">Opcja 3 — VLC (niezależnie):</strong></p>
-            <p className="pl-4">Skopiuj RTSP URL z ustawień i otwórz w VLC: <code className="text-slate-300">rtsp://admin:haslo@IP:554/cam/realmonitor...</code></p>
+        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 flex-shrink-0">
+          <h3 className="text-amber-400 font-semibold text-xs mb-2">Jak uruchomić podgląd kamer?</h3>
+          <div className="text-slate-400 text-xs space-y-1">
+            <p><strong className="text-slate-300">Opcja 1 — Snapshot HTTP:</strong> Wpisz URL w Ustawieniach (np. <code className="text-slate-300">http://admin:haslo@IP/snapshot.cgi</code>)</p>
+            <p><strong className="text-slate-300">Opcja 2 — HLS:</strong> Uruchom proxy ffmpeg w <code className="text-slate-300">rtsp-proxy/</code>, wpisz <code className="text-slate-300">http://localhost:8888/stream/cam1.m3u8</code></p>
+            <p><strong className="text-slate-300">Opcja 3 — VLC:</strong> Skopiuj RTSP URL z Ustawień i otwórz w VLC</p>
           </div>
         </div>
       )}
 
+      {/* FULLSCREEN */}
       {fullscreenCam !== null ? (
-        <div className="flex-1 min-h-0 flex flex-col">
-          <CameraFeed
-            name={cameras[fullscreenCam].name}
-            camId={cameras[fullscreenCam].camId}
-            ptzEnabled={cameras[fullscreenCam].ptzEnabled}
-            snapshotUrl={cameras[fullscreenCam].snapshotUrl}
-            rtspUrl={cameras[fullscreenCam].rtspUrl}
-            hlsUrl={cameras[fullscreenCam].hlsUrl}
-            fullscreen={true}
-            onFullscreen={() => {}}
-            onExitFullscreen={() => setFullscreenCam(null)}
-          />
-          <div className="flex gap-2 mt-3 flex-shrink-0">
+        <div className="flex-1 min-h-0 flex flex-col gap-2">
+          <div className="flex-1 min-h-0 relative">
+            {renderCamera(cameras[fullscreenCam], fullscreenCam, true)}
+          </div>
+          <div className="flex gap-2 flex-shrink-0">
             {cameras.map((cam, i) => (
-              <button
-                key={i}
-                onClick={() => setFullscreenCam(i)}
-                className={`flex-1 py-2 rounded-lg text-xs font-medium transition-colors border
-                  ${fullscreenCam === i
-                    ? 'bg-teal-500/20 border-teal-500/50 text-teal-300'
-                    : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'
-                  }`}
-              >
+              <button key={i} onClick={() => setFullscreenCam(i)}
+                className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors border
+                  ${fullscreenCam === i ? 'bg-[var(--color-accent-bg)] border-[var(--color-accent-border)] text-[var(--color-accent)]' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}>
                 {cam.name}
               </button>
             ))}
           </div>
         </div>
-      ) : (
-        <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-4 min-h-0">
+
+      /* GRID 2×2 */
+      ) : layout === 'grid2x2' ? (
+        <div className="flex-1 grid grid-cols-2 grid-rows-2 gap-3 min-h-0">
           {cameras.map((cam, i) => (
-            <div key={i}>
-              <CameraFeed
-                name={cam.name}
-                camId={cam.camId}
-                ptzEnabled={cam.ptzEnabled}
-                snapshotUrl={cam.snapshotUrl}
-                rtspUrl={cam.rtspUrl}
-                hlsUrl={cam.hlsUrl}
-                fullscreen={false}
-                onFullscreen={() => setFullscreenCam(i)}
-                onExitFullscreen={() => setFullscreenCam(null)}
-              />
+            <div key={i} className="relative min-h-0">
+              {renderCamera(cam, i, false)}
+            </div>
+          ))}
+        </div>
+
+      /* 1 DUŻY + 3 MAŁE */
+      ) : layout === 'big1' ? (
+        <div className="flex-1 flex gap-3 min-h-0">
+          <div className="flex-1 min-w-0 min-h-0 relative">
+            {renderCamera(cameras[0], 0, false)}
+          </div>
+          <div className="w-56 flex flex-col gap-3 flex-shrink-0">
+            {cameras.slice(1).map((cam, i) => (
+              <div key={i} className="flex-1 min-h-0 relative">
+                {renderCamera(cam, i + 1, false)}
+              </div>
+            ))}
+          </div>
+        </div>
+
+      /* LISTA (2 kolumny, scroll) */
+      ) : (
+        <div className="flex-1 grid grid-cols-2 gap-3 min-h-0 overflow-y-auto">
+          {cameras.map((cam, i) => (
+            <div key={i} style={{ aspectRatio: '16/9' }} className="w-full relative">
+              {renderCamera(cam, i, false)}
             </div>
           ))}
         </div>

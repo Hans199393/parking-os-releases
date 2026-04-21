@@ -62,6 +62,9 @@ export default function Chat() {
   const [selectedConv, setSelectedConv] = useState<string | null>(null);
   const [messengerLoading, setMessengerLoading] = useState(false);
   const [messengerError, setMessengerError] = useState<string | null>(null);
+  const [messengerMessages, setMessengerMessages] = useState<{id: number; role: string; content: string; created_at: string}[]>([]);
+  const [messengerMsgLoading, setMessengerMsgLoading] = useState(false);
+  const messengerEndRef = useRef<HTMLDivElement>(null);
 
   const loadMessengerConvs = useCallback(async () => {
     setMessengerLoading(true);
@@ -97,9 +100,40 @@ export default function Chat() {
     }
   }, []);
 
+  const loadMessengerMessages = useCallback(async (psid: string) => {
+    setMessengerMsgLoading(true);
+    setMessengerMessages([]);
+    try {
+      if (!(await isConfigured())) return;
+      const sb = await getSupabaseClient();
+      const { data } = await (sb as any)
+        .from('messenger_messages')
+        .select('id, role, content, created_at')
+        .eq('psid', psid)
+        .order('created_at', { ascending: true })
+        .limit(200);
+      setMessengerMessages((data || []) as {id: number; role: string; content: string; created_at: string}[]);
+    } catch (e) {
+      console.error('Error loading messenger messages:', e);
+    } finally {
+      setMessengerMsgLoading(false);
+    }
+  }, []);
+
   // Keep refs in sync with state
   useEffect(() => { selectedSessionRef.current = selectedSession; }, [selectedSession]);
   useEffect(() => { sessionsRef.current = sessions; }, [sessions]);
+
+  // Load messenger messages when conversation changes
+  useEffect(() => {
+    if (selectedConv) loadMessengerMessages(selectedConv);
+    else setMessengerMessages([]);
+  }, [selectedConv, loadMessengerMessages]);
+
+  // Auto-scroll messenger messages
+  useEffect(() => {
+    messengerEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messengerMessages]);
 
   // Load sessions with filter & pagination
   const loadSessions = useCallback(async (append = false) => {
@@ -462,15 +496,19 @@ export default function Chat() {
                       stan: {conv.state}
                     </span>
                     <span className="text-xs text-[var(--color-muted)] ml-auto">{fmtDate(conv.updated_at)}</span>
+                    <button onClick={() => loadMessengerMessages(conv.messenger_id)} title="Odśwież historię" className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition ml-1">
+                      <RefreshCw size={14} />
+                    </button>
                     <button onClick={() => setSelectedConv(null)} className="text-[var(--color-muted)] hover:text-[var(--color-text)] transition md:hidden ml-1">
                       <X size={16} />
                     </button>
                   </div>
                   <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                    {(!conv.messages || conv.messages.length === 0) && (
+                    {messengerMsgLoading && <div className="flex justify-center py-8"><Spinner /></div>}
+                    {!messengerMsgLoading && messengerMessages.length === 0 && (!conv.messages || conv.messages.length === 0) && (
                       <div className="text-center text-[var(--color-muted)] text-sm py-8">Brak wiadomości w historii</div>
                     )}
-                    {(conv.messages || []).map((msg, i) => (
+                    {!messengerMsgLoading && (messengerMessages.length > 0 ? messengerMessages : (conv.messages || [])).map((msg, i) => (
                       <div key={i} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
                         <div className={`max-w-[75%] rounded-2xl px-4 py-2 text-sm ${
                           msg.role === 'user'
@@ -485,9 +523,10 @@ export default function Chat() {
                         </div>
                       </div>
                     ))}
+                    <div ref={messengerEndRef} />
                   </div>
                   <div className="px-4 py-2 border-t border-[var(--color-border)] text-[11px] text-[var(--color-muted)] text-center bg-blue-500/5">
-                    📌 Odczyt historii Messenger · odpowiadaj przez Facebook Messenger
+                    📌 Pełna historia Messenger · odpowiadaj przez Facebook Messenger
                   </div>
                 </>
               );

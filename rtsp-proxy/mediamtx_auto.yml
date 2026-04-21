@@ -12,10 +12,6 @@ api: no
 metrics: no
 paths:
   cam2:
-    source: rtsp://192.168.0.56:554/onvif1
-    sourceProtocol: udp
-    sourceOnDemand: no
-  cam3:
-    source: rtsp://192.168.0.58:554/onvif1
+    source: rtsp://192.168.0.57:554/onvif1
     sourceProtocol: udp
     sourceOnDemand: no
