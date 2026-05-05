@@ -14,7 +14,7 @@ export function Button({ variant = 'primary', size = 'md', loading, children, cl
     'focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)] ' +
     'active:scale-[0.98] hover:-translate-y-[1px]';
   const variants = {
-    primary:   'bg-[var(--color-accent)] text-white shadow-[var(--shadow-sm)] hover:bg-[var(--color-accent-hover)] hover:shadow-[var(--shadow-md)] focus-visible:ring-[var(--color-accent)]',
+    primary:   'bg-gradient-accent text-white shadow-[var(--shadow-md)] hover:shadow-[var(--shadow-lg)] focus-visible:ring-[var(--color-accent)]',
     secondary: 'bg-[var(--color-surface-2)] text-[var(--color-text)] border border-[var(--color-border)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface)] focus-visible:ring-[var(--color-text-muted)]',
     danger:    'bg-[var(--color-danger)] text-white shadow-[var(--shadow-sm)] hover:opacity-90 hover:shadow-[var(--shadow-md)] focus-visible:ring-[var(--color-danger)]',
     success:   'bg-[var(--color-success)] text-white shadow-[var(--shadow-sm)] hover:opacity-90 hover:shadow-[var(--shadow-md)] focus-visible:ring-[var(--color-success)]',

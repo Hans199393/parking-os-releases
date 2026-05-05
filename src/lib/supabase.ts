@@ -177,6 +177,22 @@ export async function getConfig(key: string): Promise<string | null> {
   return (data as { value: string } | null)?.value ?? null;
 }
 
+// Bulk read — wczytuje wiele kluczy jedną kwerendą
+export async function getConfigs(keys: string[]): Promise<Record<string, string>> {
+  if (keys.length === 0) return {};
+  const sb = await getSupabaseClient();
+  const { data, error } = await sb
+    .from('settings' as never)
+    .select('key,value')
+    .in('key', keys);
+  if (error) throw error;
+  const out: Record<string, string> = {};
+  for (const row of (data as { key: string; value: string }[] | null) ?? []) {
+    out[row.key] = row.value;
+  }
+  return out;
+}
+
 export async function setConfig(key: string, value: string): Promise<void> {
   const sb = await getSupabaseClient();
   const { error } = await (sb as SupabaseClient)

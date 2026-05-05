@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getStore } from '../../lib/store';
-import { resetSupabaseClient } from '../../lib/supabase';
+import { resetSupabaseClient, getConfigs } from '../../lib/supabase';
 import { changePassword as changeAuthPassword, verifyCurrentPassword } from '../../lib/auth';
 import { Button, Input, Card, Select, Badge, SectionTitle } from '../shared/UI';
 import { Check, Eye, EyeOff, Wifi, WifiOff, Camera, Cpu, Palette, Link2, Lock, Users, Building2, Cloud, CloudOff, Banknote, Clock, CalendarPlus, Megaphone, Car, MapPin } from 'lucide-react';
@@ -143,6 +143,36 @@ export default function Settings({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, values['admin_url'], values['admin_token']]);
+
+  // Auto-pobieranie aktualnych wartości z chmury (Supabase) gdy wchodzimy na Parking
+  // Dzięki temu widać prawdziwy stan: spots_available, komunikat, ceny, godziny
+  useEffect(() => {
+    if (tab !== 'parking') return;
+    if (!values['supabase_url'] || !values['supabase_key']) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const keys = [
+          'rate_basic', 'rate_reservation', 'rate_after_hours',
+          'open_from', 'open_to', 'open_days',
+          'spots_available', 'komunikat',
+          'owner_phone', 'owner_email', 'parking_address', 'parking_name', 'parking_nip',
+          'parking_capacity',
+        ];
+        const cloud = await getConfigs(keys);
+        if (cancelled) return;
+        setValues(prev => {
+          const next = { ...prev };
+          for (const [k, v] of Object.entries(cloud)) next[k] = v;
+          return next;
+        });
+      } catch (e) {
+        console.warn('[settings] cloud fetch failed', e);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, values['supabase_url'], values['supabase_key']]);
 
   const set = (key: string, val: string) => setValues(v => ({ ...v, [key]: val }));
   const bool = (key: string) => values[key] === 'true';

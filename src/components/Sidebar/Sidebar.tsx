@@ -1,4 +1,4 @@
-﻿import { LayoutDashboard, Camera, CalendarDays, DollarSign, Globe, Settings, Smartphone, MessageCircle, Mail, LogOut, ClipboardList } from 'lucide-react';
+﻿import { LayoutDashboard, Camera, CalendarDays, DollarSign, Settings, Smartphone, MessageCircle, Mail, LogOut, ClipboardList } from 'lucide-react';
 import type { AppUser } from '../../lib/session';
 
 export type Page = 'dashboard' | 'cameras' | 'reservations' | 'finances' | 'admin' | 'chat' | 'email' | 'settings' | 'logs';
@@ -8,8 +8,7 @@ const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: 'cameras', label: 'Kamery', icon: <Camera size={20} /> },
   { id: 'reservations', label: 'Rezerwacje', icon: <CalendarDays size={20} /> },
   { id: 'finances', label: 'Finanse', icon: <DollarSign size={20} /> },
-  { id: 'admin', label: 'Panel WWW', icon: <Globe size={20} /> },
-  { id: 'chat', label: 'Czat Orzel', icon: <MessageCircle size={20} /> },
+  { id: 'chat', label: 'Czat Orzeł', icon: <MessageCircle size={20} /> },
   { id: 'email', label: 'Skrzynka', icon: <Mail size={20} /> },
   { id: 'logs', label: 'Logi', icon: <ClipboardList size={20} /> },
   { id: 'settings', label: 'Ustawienia', icon: <Settings size={20} /> },
