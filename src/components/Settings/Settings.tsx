@@ -3,8 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { getStore } from '../../lib/store';
 import { resetSupabaseClient, getConfigs } from '../../lib/supabase';
 import { changePassword as changeAuthPassword, verifyCurrentPassword } from '../../lib/auth';
-import { Button, Input, Card, Select, Badge, SectionTitle } from '../shared/UI';
-import { Check, Eye, EyeOff, Wifi, WifiOff, Camera, Cpu, Palette, Link2, Lock, Users, Building2, Cloud, CloudOff, Banknote, Clock, CalendarPlus, Megaphone, Car, MapPin } from 'lucide-react';
+import { Button, Input, Card, Select } from '../shared/UI';
+import { Check, Eye, EyeOff, Wifi, WifiOff, Camera, Cpu, Palette, Link2, Lock, Users, Building2, Cloud, Banknote, Clock, CalendarPlus, Megaphone, Car, MapPin } from 'lucide-react';
 import type { AppUser } from '../../lib/session';
 import AccountManager from './AccountManager';
 import { logAction } from '../../lib/audit';
@@ -357,28 +357,33 @@ export default function Settings({
 
   return (
     <div className="h-full flex flex-col">
-      <div className="px-6 pt-5 pb-0 flex-shrink-0">
-        <div className="flex items-baseline gap-3">
-          <h1 className="text-2xl font-bold text-[var(--color-text)] tracking-tight">Ustawienia</h1>
-          <span className="text-[var(--color-text-muted)] text-xs">Konfiguracja Parking.OS</span>
+      <div className="px-8 pt-7 pb-0 flex-shrink-0 relative">
+        {/* Hero header z bursztynowym glow */}
+        <div className="flex items-center gap-4 mb-1">
+          <div className="w-1 h-10 rounded-full bg-gradient-accent shadow-[var(--shadow-glow)]" />
+          <div>
+            <h1 className="display-heading text-[var(--color-text)]">Ustawienia</h1>
+            <p className="text-[var(--color-text-muted)] text-sm mt-0.5">Konfiguracja Parking.OS — wszystko w jednym miejscu</p>
+          </div>
         </div>
 
-        <div className="flex gap-1 mt-5 overflow-x-auto pb-px">
+        {/* Tab nav — pill style z gradientem na aktywnym */}
+        <div className="flex gap-2 mt-6 overflow-x-auto pb-2 -mx-1 px-1">
           {TABS.map(({ id, label, Icon }) => (
             <button key={id} onClick={() => setTab(id)}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-t-[var(--radius-md)] transition-all whitespace-nowrap relative
+              className={`relative flex items-center gap-2 px-4 py-2.5 text-sm font-bold rounded-full transition-all duration-200 whitespace-nowrap
                 ${tab === id
-                  ? 'bg-[var(--color-surface)] text-[var(--color-accent)] border border-[var(--color-border)] border-b-[var(--color-surface)] -mb-px shadow-[var(--shadow-sm)]'
-                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] border border-transparent'}`}>
-              <Icon size={15} />
-              {label}
+                  ? 'text-[#1a1410] shadow-[var(--shadow-glow)] scale-105'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface)]/60 backdrop-blur-sm border border-[var(--color-border)]/50'}`}>
+              {tab === id && <span className="absolute inset-0 rounded-full bg-gradient-accent" aria-hidden="true" />}
+              <span className="relative z-10 flex items-center"><Icon size={15} /></span>
+              <span className="relative z-10">{label}</span>
             </button>
           ))}
         </div>
-        <div className="border-b border-[var(--color-border)]" />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+      <div className="flex-1 overflow-y-auto px-8 py-6 space-y-5">
 
         {tab === 'cameras' && <>
           {CAM_DEFAULTS.map(({ id, defaultName }, idx) => (
@@ -615,71 +620,157 @@ export default function Settings({
           ];
           const csv = (values['open_days'] ?? '0,5,6').split(',').map(s => s.trim()).filter(Boolean);
           return <>
-            {/* STICKY TOOLBAR — najczęstsza zmiana, zawsze widoczny */}
-            <div className="sticky -top-5 -mx-6 px-6 py-3 z-10 bg-[var(--color-bg)]/95 backdrop-blur-md border-b border-[var(--color-border)] mb-2">
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex items-center gap-2 mr-2">
-                  <Car size={16} className="text-[var(--color-text-muted)]" />
-                  <span className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]">Status walk-in</span>
+            {/* ═══ HERO STATUS BANNER ═══ Wielki, dramatyczny — od razu widać stan parkingu */}
+            <div className={`relative overflow-hidden rounded-[var(--radius-xl)] p-7 mb-6 animate-slideUp shadow-[var(--shadow-lg)]
+              ${isAvailable
+                ? 'bg-gradient-to-br from-emerald-100 via-emerald-50 to-emerald-100 dark:from-emerald-900/30 dark:via-emerald-950/40 dark:to-emerald-900/30 border border-emerald-300/40 dark:border-emerald-700/30'
+                : 'bg-gradient-to-br from-red-100 via-red-50 to-red-100 dark:from-red-900/30 dark:via-red-950/40 dark:to-red-900/30 border border-red-300/40 dark:border-red-700/30'}`}>
+              {/* Animowany glow w tle */}
+              <div className={`absolute -top-20 -right-20 w-64 h-64 rounded-full blur-3xl opacity-40 animate-[pulse-soft_4s_ease-in-out_infinite]
+                ${isAvailable ? 'bg-emerald-400' : 'bg-red-400'}`} />
+              <div className="absolute -bottom-16 -left-16 w-48 h-48 rounded-full blur-3xl opacity-25"
+                   style={{ background: 'var(--gradient-accent)' }} />
+
+              <div className="relative flex items-center gap-6 flex-wrap">
+                <div className={`w-20 h-20 rounded-[var(--radius-lg)] flex items-center justify-center shadow-[var(--shadow-md)] flex-shrink-0
+                  ${isAvailable ? 'bg-[var(--color-success)] ring-glow' : 'bg-[var(--color-danger)]'}`}>
+                  <Car size={40} className="text-white" />
                 </div>
-                <button
-                  onClick={() => set('spots_available', 'true')}
-                  className={`flex-1 sm:flex-none px-4 py-2 rounded-[var(--radius-md)] font-bold text-sm transition-all duration-150 border-2
-                    ${isAvailable
-                      ? 'bg-[var(--color-success-bg)] border-[var(--color-success)] text-[var(--color-success)] shadow-[var(--shadow-sm)]'
-                      : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-success)] hover:text-[var(--color-success)]'}`}>
-                  ✓ Wolne miejsca
-                </button>
-                <button
-                  onClick={() => set('spots_available', 'false')}
-                  className={`flex-1 sm:flex-none px-4 py-2 rounded-[var(--radius-md)] font-bold text-sm transition-all duration-150 border-2
-                    ${!isAvailable
-                      ? 'bg-[var(--color-danger-bg)] border-[var(--color-danger)] text-[var(--color-danger)] shadow-[var(--shadow-sm)]'
-                      : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]'}`}>
-                  ✕ Brak miejsc
-                </button>
-                <Badge variant={isAvailable ? 'success' : 'danger'} className="ml-auto">
-                  {isAvailable ? 'klienci mogą przyjechać' : 'parking pełny'}
-                </Badge>
+                <div className="flex-1 min-w-[220px]">
+                  <p className="text-xs font-bold uppercase tracking-[0.18em] text-[var(--color-text-muted)] mb-1">Status parkingu (walk-in)</p>
+                  <h2 className={`display-heading ${isAvailable ? 'text-emerald-700 dark:text-emerald-300' : 'text-red-700 dark:text-red-300'}`}>
+                    {isAvailable ? 'WOLNE MIEJSCA' : 'PARKING PEŁNY'}
+                  </h2>
+                  <p className="text-sm text-[var(--color-text-muted)] mt-1">
+                    {isAvailable ? 'Klienci mogą przyjechać bez rezerwacji' : 'Bot odpowiada „brak miejsc", strona pokazuje czerwony pasek'}
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2 ml-auto">
+                  <button
+                    onClick={() => set('spots_available', 'true')}
+                    className={`px-5 py-2.5 rounded-[var(--radius-md)] font-bold text-sm transition-all duration-200 border-2
+                      ${isAvailable
+                        ? 'bg-[var(--color-success)] border-[var(--color-success)] text-white shadow-[var(--shadow-md)] cursor-default'
+                        : 'border-emerald-400/50 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 hover:border-emerald-500'}`}>
+                    ✓ Otwórz
+                  </button>
+                  <button
+                    onClick={() => set('spots_available', 'false')}
+                    className={`px-5 py-2.5 rounded-[var(--radius-md)] font-bold text-sm transition-all duration-200 border-2
+                      ${!isAvailable
+                        ? 'bg-[var(--color-danger)] border-[var(--color-danger)] text-white shadow-[var(--shadow-md)] cursor-default'
+                        : 'border-red-400/50 text-red-700 dark:text-red-400 hover:bg-red-500/10 hover:border-red-500'}`}>
+                    ✕ Zamknij
+                  </button>
+                </div>
               </div>
             </div>
 
-            {/* 2 KOLUMNY — Cennik / Pojemność / Godziny / Dni */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <Card title="Cennik" subtitle="Stawki widoczne na stronie www i w czacie bota" icon={<Banknote size={18} />}>
-                <div className="grid grid-cols-2 gap-3">
-                  <Input label="Bez rezerwacji"
-                    value={values['rate_basic'] ?? ''}
-                    onChange={e => set('rate_basic', e.target.value)}
-                    placeholder="20" hint="zł / dobę" />
-                  <Input label="Z rezerwacją"
-                    value={values['rate_reservation'] ?? ''}
-                    onChange={e => set('rate_reservation', e.target.value)}
-                    placeholder="25" hint="zł / dobę" />
+            {/* ═══ MASONRY KART — Cennik | Pojemność | Godziny | Dni dodatkowe ═══ */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+              {/* CENNIK — z hero ceną */}
+              <div className="glass-strong rounded-[var(--radius-lg)] p-6 animate-slideUp transition-all hover:shadow-[var(--shadow-xl)] hover:-translate-y-0.5"
+                   style={{ animationDelay: '50ms' }}>
+                <div className="flex items-start justify-between mb-5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-[var(--radius-md)] bg-gradient-accent flex items-center justify-center shadow-[var(--shadow-md)]">
+                      <Banknote size={22} className="text-[#1a1410]" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-[var(--color-text)]">Cennik</h3>
+                      <p className="text-xs text-[var(--color-text-muted)]">Stawki widoczne na stronie i w czacie bota</p>
+                    </div>
+                  </div>
                 </div>
-              </Card>
-
-              <Card title="Pojemność" subtitle="Liczba miejsc dostępnych do rezerwacji online" icon={<MapPin size={18} />}>
-                <Input label="Miejsca z rezerwacją"
-                  type="number"
-                  value={values['parking_capacity'] ?? ''}
-                  onChange={e => set('parking_capacity', e.target.value)}
-                  placeholder="10"
-                  hint="reszta klientów przyjeżdża walk-in (cena podstawowa)" />
-              </Card>
-
-              <Card title="Godziny otwarcia" subtitle="Codziennie obowiązujące" icon={<Clock size={18} />}>
-                <div className="grid grid-cols-2 gap-3 mb-4">
-                  <Input label="Otwarcie"
-                    value={values['open_from'] ?? ''}
-                    onChange={e => set('open_from', e.target.value)}
-                    placeholder="08:00" />
-                  <Input label="Zamknięcie"
-                    value={values['open_to'] ?? ''}
-                    onChange={e => set('open_to', e.target.value)}
-                    placeholder="19:00" />
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="relative">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--color-text-muted)] mb-1">Walk-in</p>
+                    <div className="flex items-baseline gap-1">
+                      <input
+                        type="text"
+                        value={values['rate_basic'] ?? ''}
+                        onChange={e => set('rate_basic', e.target.value)}
+                        placeholder="20"
+                        className="hero-number bg-transparent border-0 outline-none w-full p-0 leading-none"
+                        style={{ fontSize: 'clamp(2.2rem,5vw,3.5rem)' }}
+                      />
+                      <span className="text-lg font-bold text-[var(--color-text-muted)]">zł</span>
+                    </div>
+                    <p className="text-xs text-[var(--color-text-muted)] mt-1">/ dobę bez rezerwacji</p>
+                  </div>
+                  <div className="relative">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--color-accent)] mb-1">Z rezerwacją ★</p>
+                    <div className="flex items-baseline gap-1">
+                      <input
+                        type="text"
+                        value={values['rate_reservation'] ?? ''}
+                        onChange={e => set('rate_reservation', e.target.value)}
+                        placeholder="25"
+                        className="hero-number bg-transparent border-0 outline-none w-full p-0 leading-none"
+                        style={{ fontSize: 'clamp(2.2rem,5vw,3.5rem)' }}
+                      />
+                      <span className="text-lg font-bold text-[var(--color-text-muted)]">zł</span>
+                    </div>
+                    <p className="text-xs text-[var(--color-text-muted)] mt-1">/ dobę online</p>
+                  </div>
                 </div>
-                <SectionTitle>Dni pracujące</SectionTitle>
+              </div>
+
+              {/* POJEMNOŚĆ — duża cyfra */}
+              <div className="glass-strong rounded-[var(--radius-lg)] p-6 animate-slideUp transition-all hover:shadow-[var(--shadow-xl)] hover:-translate-y-0.5"
+                   style={{ animationDelay: '100ms' }}>
+                <div className="flex items-start justify-between mb-5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-[var(--radius-md)] bg-gradient-accent flex items-center justify-center shadow-[var(--shadow-md)]">
+                      <MapPin size={22} className="text-[#1a1410]" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-[var(--color-text)]">Pojemność online</h3>
+                      <p className="text-xs text-[var(--color-text-muted)]">Reszta klientów przyjeżdża walk-in</p>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-center py-4">
+                  <div className="flex items-baseline gap-3">
+                    <input
+                      type="number"
+                      value={values['parking_capacity'] ?? ''}
+                      onChange={e => set('parking_capacity', e.target.value)}
+                      placeholder="10"
+                      className="hero-number bg-transparent border-0 outline-none p-0 leading-none w-32 text-center"
+                    />
+                    <span className="text-xl font-bold text-[var(--color-text-muted)]">miejsc</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* GODZINY OTWARCIA */}
+              <div className="glass-strong rounded-[var(--radius-lg)] p-6 animate-slideUp transition-all hover:shadow-[var(--shadow-xl)] hover:-translate-y-0.5"
+                   style={{ animationDelay: '150ms' }}>
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="w-11 h-11 rounded-[var(--radius-md)] bg-gradient-accent flex items-center justify-center shadow-[var(--shadow-md)]">
+                    <Clock size={22} className="text-[#1a1410]" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-[var(--color-text)]">Godziny otwarcia</h3>
+                    <p className="text-xs text-[var(--color-text-muted)]">Codziennie obowiązujące</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-5">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--color-text-muted)] mb-1.5">Otwarcie</p>
+                    <input type="time" value={values['open_from'] ?? ''}
+                      onChange={e => set('open_from', e.target.value)}
+                      className="w-full text-2xl font-bold text-[var(--color-text)] bg-transparent border-2 border-[var(--color-border)] rounded-[var(--radius-md)] px-3 py-2 hover:border-[var(--color-accent)] focus:outline-none focus:border-[var(--color-accent)] transition-colors" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--color-text-muted)] mb-1.5">Zamknięcie</p>
+                    <input type="time" value={values['open_to'] ?? ''}
+                      onChange={e => set('open_to', e.target.value)}
+                      className="w-full text-2xl font-bold text-[var(--color-text)] bg-transparent border-2 border-[var(--color-border)] rounded-[var(--radius-md)] px-3 py-2 hover:border-[var(--color-accent)] focus:outline-none focus:border-[var(--color-accent)] transition-colors" />
+                  </div>
+                </div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--color-text-muted)] mb-2">Dni pracujące</p>
                 <div className="flex flex-wrap gap-1.5">
                   {days.map(({ v, l }) => {
                     const active = csv.includes(v);
@@ -690,24 +781,36 @@ export default function Settings({
                           next.sort();
                           set('open_days', next.join(','));
                         }}
-                        className={`w-11 h-11 rounded-[var(--radius-md)] text-sm font-bold border-2 transition-all duration-150
+                        className={`w-12 h-12 rounded-[var(--radius-md)] text-sm font-bold transition-all duration-200 relative overflow-hidden
                           ${active
-                            ? 'bg-[var(--color-accent-bg)] border-[var(--color-accent)] text-[var(--color-accent)] shadow-[var(--shadow-sm)]'
-                            : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]'}`}>
-                        {l}
+                            ? 'text-[#1a1410] shadow-[var(--shadow-md)] scale-105'
+                            : 'border-2 border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]'}`}>
+                        {active && <span className="absolute inset-0 bg-gradient-accent" aria-hidden="true" />}
+                        <span className="relative z-10">{l}</span>
                       </button>
                     );
                   })}
                 </div>
-              </Card>
+              </div>
 
-              <Card title="Dni dodatkowe" subtitle="Jednorazowe wyjątki — np. święto, długi weekend" icon={<CalendarPlus size={18} />}>
-                <div className="flex gap-2 mb-3">
+              {/* DNI DODATKOWE */}
+              <div className="glass-strong rounded-[var(--radius-lg)] p-6 animate-slideUp transition-all hover:shadow-[var(--shadow-xl)] hover:-translate-y-0.5"
+                   style={{ animationDelay: '200ms' }}>
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="w-11 h-11 rounded-[var(--radius-md)] bg-gradient-accent flex items-center justify-center shadow-[var(--shadow-md)]">
+                    <CalendarPlus size={22} className="text-[#1a1410]" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-[var(--color-text)]">Dni dodatkowe</h3>
+                    <p className="text-xs text-[var(--color-text-muted)]">Jednorazowe wyjątki — święto, długi weekend</p>
+                  </div>
+                </div>
+                <div className="flex gap-2 mb-4">
                   <input
                     type="date"
                     value={extraDayInput}
                     onChange={e => setExtraDayInput(e.target.value)}
-                    className="flex-1 px-3.5 py-2.5 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] text-sm transition-all hover:border-[var(--color-border-strong)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]/40 focus:border-[var(--color-accent)]"
+                    className="flex-1 px-3.5 py-2.5 rounded-[var(--radius-md)] border-2 border-[var(--color-border)] bg-transparent text-[var(--color-text)] text-sm transition-all hover:border-[var(--color-border-strong)] focus:outline-none focus:border-[var(--color-accent)]"
                   />
                   <Button size="sm" variant="primary" onClick={addExtraDay} disabled={!extraDayInput || extraDaysLoading}>
                     + Dodaj
@@ -716,39 +819,53 @@ export default function Settings({
                 </div>
                 {extraDaysError && <p className="text-xs text-[var(--color-danger)] mb-2 font-medium">Błąd: {extraDaysError}</p>}
                 {extraDaysLoading && <p className="text-xs text-[var(--color-text-muted)] mb-2">Ładowanie...</p>}
-                <div className="flex flex-wrap gap-1.5 min-h-[2rem]">
+                <div className="flex flex-wrap gap-2 min-h-[2.5rem]">
                   {extraDays.length === 0 && !extraDaysLoading && (
-                    <span className="text-xs text-[var(--color-text-muted)] opacity-60 italic">brak dodatkowych dni</span>
+                    <span className="text-xs text-[var(--color-text-muted)] opacity-60 italic py-2">brak dodatkowych dni</span>
                   )}
                   {extraDays.map(d => (
-                    <Badge key={d.id ?? d.date} variant="accent" className="!px-2.5 !py-1 !text-xs">
+                    <span key={d.id ?? d.date}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold bg-gradient-accent text-[#1a1410] shadow-[var(--shadow-sm)] animate-fadeIn">
                       {plToIsoDate(d.date)}
                       <button
                         onClick={() => d.id != null && removeExtraDay(d.id)}
-                        className="ml-1 opacity-60 hover:opacity-100 font-bold text-[var(--color-danger)]"
+                        className="ml-0.5 w-4 h-4 rounded-full bg-black/20 hover:bg-black/40 flex items-center justify-center transition-colors"
                         aria-label={`Usuń ${d.date}`}>×</button>
-                    </Badge>
+                    </span>
                   ))}
                 </div>
-              </Card>
+              </div>
             </div>
 
-            {/* KOMUNIKAT — pełna szerokość, oddzielnie */}
-            <Card
-              title="Komunikat na stronie WWW"
-              subtitle="Wyświetla się żółtym banerem — np. zmiana godzin, majówka, awaria"
-              icon={<Megaphone size={18} />}
-              variant={kom.aktywny ? 'warning' : 'default'}
-              action={
+            {/* ═══ KOMUNIKAT — full width, animowany gdy aktywny ═══ */}
+            <div className={`relative overflow-hidden rounded-[var(--radius-lg)] p-6 mt-5 animate-slideUp transition-all
+              ${kom.aktywny
+                ? 'bg-gradient-to-br from-amber-100 via-yellow-50 to-amber-100 dark:from-amber-900/30 dark:via-yellow-950/30 dark:to-amber-900/30 border-2 border-amber-400/50 shadow-[var(--shadow-glow)]'
+                : 'glass-strong'}`}
+                 style={{ animationDelay: '250ms' }}>
+              {kom.aktywny && (
+                <div className="absolute top-0 left-0 w-full h-1 shimmer-bg" />
+              )}
+              <div className="flex items-start justify-between mb-5 gap-4 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <div className={`w-11 h-11 rounded-[var(--radius-md)] flex items-center justify-center shadow-[var(--shadow-md)]
+                    ${kom.aktywny ? 'bg-gradient-accent animate-[pulse-soft_2s_ease-in-out_infinite]' : 'bg-[var(--color-surface-2)]'}`}>
+                    <Megaphone size={22} className={kom.aktywny ? 'text-[#1a1410]' : 'text-[var(--color-text-muted)]'} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-[var(--color-text)]">Komunikat na stronie WWW</h3>
+                    <p className="text-xs text-[var(--color-text-muted)]">Żółty baner — np. zmiana godzin, majówka, awaria</p>
+                  </div>
+                </div>
                 <button
                   onClick={() => updateKom({ aktywny: !kom.aktywny })}
-                  className={`px-3 py-1.5 rounded-[var(--radius-md)] font-bold text-xs border-2 transition-all
+                  className={`px-4 py-2 rounded-full font-bold text-xs transition-all
                     ${kom.aktywny
-                      ? 'bg-[var(--color-warning)] border-[var(--color-warning)] text-white'
-                      : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)]'}`}>
-                  {kom.aktywny ? '● aktywny' : '○ nieaktywny'}
+                      ? 'bg-gradient-accent text-[#1a1410] shadow-[var(--shadow-md)]'
+                      : 'border-2 border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)]'}`}>
+                  {kom.aktywny ? '● AKTYWNY' : '○ nieaktywny'}
                 </button>
-              }>
+              </div>
               <div className="space-y-3">
                 <Input label="Tytuł"
                   value={kom.tytul ?? ''}
@@ -761,7 +878,7 @@ export default function Settings({
                     onChange={e => updateKom({ tresc: e.target.value })}
                     rows={3}
                     placeholder="Treść komunikatu widoczna na stronie..."
-                    className="w-full px-3.5 py-2.5 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] text-sm resize-none transition-all hover:border-[var(--color-border-strong)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]/40 focus:border-[var(--color-accent)]" />
+                    className="w-full px-3.5 py-2.5 rounded-[var(--radius-md)] border-2 border-[var(--color-border)] bg-transparent text-[var(--color-text)] text-sm resize-none transition-all hover:border-[var(--color-border-strong)] focus:outline-none focus:border-[var(--color-accent)]" />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <Input label="Widoczny od" type="datetime-local"
@@ -772,30 +889,41 @@ export default function Settings({
                     onChange={e => updateKom({ do: e.target.value })} />
                 </div>
               </div>
-            </Card>
+            </div>
 
-            {/* ZAPIS — pełna szerokość */}
-            <Card
-              variant={cloudResult?.ok ? 'success' : 'accent'}
-              title="Wyślij zmiany do chmury"
-              subtitle="Bot, widget czatu i strona WWW od razu zobaczą nowe wartości"
-              icon={cloudResult?.ok ? <Cloud size={18} /> : <CloudOff size={18} />}>
-              <div className="flex items-center gap-3 flex-wrap">
-                <Button variant="primary" size="lg" onClick={handleCloudSaveParking} loading={cloudSaving}>
-                  <Cloud size={18} />
-                  Zapisz w chmurze
-                </Button>
-                {cloudResult && (
-                  <span className={`text-sm font-semibold ${cloudResult.ok ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]'}`}>
-                    {cloudResult.ok ? '✓ Zapisano!' : `✕ Błąd: ${cloudResult.error}`}
-                  </span>
+            {/* Spacer dla floating save button */}
+            <div className="h-24" />
+
+            {/* ═══ FLOATING SAVE BUTTON ═══ Zawsze widoczny w prawym dolnym rogu */}
+            <div className="fixed bottom-8 right-8 z-50 animate-slideUp">
+              <button
+                onClick={handleCloudSaveParking}
+                disabled={cloudSaving}
+                className={`group relative inline-flex items-center gap-3 px-7 py-4 rounded-full font-bold text-base text-[#1a1410] shadow-[var(--shadow-xl)] hover:shadow-[var(--shadow-glow)] transition-all duration-300 hover:scale-105 active:scale-100 disabled:opacity-60 disabled:cursor-not-allowed bg-gradient-accent`}>
+                {cloudSaving ? (
+                  <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                  </svg>
+                ) : cloudResult?.ok ? (
+                  <Check size={20} />
+                ) : (
+                  <Cloud size={20} />
                 )}
-              </div>
-              <p className="text-[11px] text-[var(--color-text-muted)] mt-3 opacity-70">
-                Wymaga skonfigurowanego URL panelu CMS i ADMIN_TOKEN (zakładka <strong>Połączenia</strong>).
-                Status walk-in i komunikat są częścią tego zapisu.
-              </p>
-            </Card>
+                <span>
+                  {cloudSaving ? 'Wysyłam...' : cloudResult?.ok ? 'Zapisano!' : 'Zapisz w chmurze'}
+                </span>
+                {/* Pulsująca otoczka */}
+                {!cloudSaving && !cloudResult?.ok && (
+                  <span className="absolute inset-0 rounded-full ring-glow pointer-events-none" aria-hidden="true" />
+                )}
+              </button>
+              {cloudResult && !cloudResult.ok && (
+                <div className="mt-2 px-4 py-2 rounded-[var(--radius-md)] bg-[var(--color-danger)] text-white text-xs font-bold shadow-[var(--shadow-md)] max-w-xs animate-fadeIn">
+                  ✕ {cloudResult.error}
+                </div>
+              )}
+            </div>
           </>;
         })()}
 

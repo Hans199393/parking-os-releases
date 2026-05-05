@@ -205,7 +205,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-screen overflow-hidden p-3 gap-3">
       <Sidebar
         current={page}
         onChange={handleNavigate}
@@ -217,7 +217,7 @@ export default function App() {
         user={currentUser}
         onLogout={handleLogout}
       />
-      <main className="flex-1 overflow-hidden relative backdrop-blur-md bg-[var(--color-bg)]">
+      <main className="flex-1 overflow-hidden relative glass-strong rounded-[var(--radius-xl)] animate-fadeIn">
         {page === 'dashboard' && (
           <Dashboard
             onNavigate={handleNavigate}
