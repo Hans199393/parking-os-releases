@@ -3,8 +3,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { getStore } from '../../lib/store';
 import { resetSupabaseClient } from '../../lib/supabase';
 import { changePassword as changeAuthPassword, verifyCurrentPassword } from '../../lib/auth';
-import { Button, Input, Card, Select } from '../shared/UI';
-import { Check, Eye, EyeOff, Wifi, WifiOff, Camera, Cpu, Palette, Link2, Lock, Users } from 'lucide-react';
+import { Button, Input, Card, Select, Badge, SectionTitle } from '../shared/UI';
+import { Check, Eye, EyeOff, Wifi, WifiOff, Camera, Cpu, Palette, Link2, Lock, Users, Building2, Cloud, CloudOff, Banknote, Clock, CalendarPlus, Megaphone, Car, MapPin } from 'lucide-react';
 import type { AppUser } from '../../lib/session';
 import AccountManager from './AccountManager';
 import { logAction } from '../../lib/audit';
@@ -29,13 +29,18 @@ const ALL_KEYS = [
   'cam4_snapshot_url', 'cam4_rtsp_url', 'cam4_hls_url', 'cam4_name',
   'snapshot_interval', 'show_roi_overlay',
   'detection_confidence', 'detection_interval', 'detector_autostart',
-  'parking_name', 'parking_capacity', 'parking_capacity_disabled',
+  'parking_name', 'parking_capacity',
   'rate_hourly', 'rate_daily', 'currency', 'card_commission_rate',
   'supabase_url', 'supabase_key',
   'email_imap_host', 'email_imap_port', 'email_smtp_host', 'email_smtp_port',
   'email_user', 'email_pass',
-  'admin_url', 'pwa_url',
+  'admin_url', 'admin_token', 'pwa_url',
   'session_timeout', 'confirm_exit', 'accent_color',
+  // Phase A/B — central settings (cache lokalny, źródło prawdy: Supabase settings)
+  'rate_basic', 'rate_reservation', 'rate_after_hours',
+  'open_from', 'open_to', 'open_days',
+  'spots_available', 'komunikat',
+  'owner_phone', 'owner_email', 'parking_address', 'parking_nip',
 ];
 
 const CAM_DEFAULTS = [
@@ -58,15 +63,16 @@ function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: 
   );
 }
 
-type Tab = 'cameras' | 'detection' | 'appearance' | 'connections' | 'account' | 'accounts';
+type Tab = 'cameras' | 'detection' | 'appearance' | 'connections' | 'account' | 'accounts' | 'parking';
 
 const BASE_TABS: { id: Tab; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
-  { id: 'cameras',     label: 'Kamery',     Icon: Camera  },
-  { id: 'detection',   label: 'Detekcja',   Icon: Cpu     },
-  { id: 'appearance',  label: 'Wyglad',     Icon: Palette },
-  { id: 'connections', label: 'Polaczenia', Icon: Link2   },
-  { id: 'account',     label: 'Konto',      Icon: Lock    },
-  { id: 'accounts',    label: 'Konta',      Icon: Users   },
+  { id: 'cameras',     label: 'Kamery',     Icon: Camera   },
+  { id: 'detection',   label: 'Detekcja',   Icon: Cpu      },
+  { id: 'parking',     label: 'Parking',    Icon: Building2 },
+  { id: 'appearance',  label: 'Wyglad',     Icon: Palette  },
+  { id: 'connections', label: 'Polaczenia', Icon: Link2    },
+  { id: 'account',     label: 'Konto',      Icon: Lock     },
+  { id: 'accounts',    label: 'Konta',      Icon: Users    },
 ];
 
 export default function Settings({
@@ -91,6 +97,17 @@ export default function Settings({
   const [testing, setTesting]           = useState(false);
   const [emailResult, setEmailResult]   = useState<{ ok: boolean; error?: string } | null>(null);
   const [testingEmail, setTestingEmail] = useState(false);
+
+  // Phase B \u2014 zapis ustawie\u0144 parkingu do chmury (Vercel/Supabase)
+  const [cloudSaving, setCloudSaving] = useState(false);
+  const [cloudResult, setCloudResult] = useState<{ ok: boolean; error?: string } | null>(null);
+
+  // Dni dodatkowe (tabela extra_open_days)
+  type ExtraDay = { id?: number; date: string; note?: string | null; active?: boolean };
+  const [extraDays, setExtraDays] = useState<ExtraDay[]>([]);
+  const [extraDayInput, setExtraDayInput] = useState('');
+  const [extraDaysLoading, setExtraDaysLoading] = useState(false);
+  const [extraDaysError, setExtraDaysError] = useState<string | null>(null);
 
   const [oldPass, setOldPass]       = useState('');
   const [newPass, setNewPass]       = useState('');
@@ -118,6 +135,14 @@ export default function Settings({
       setValues(loaded);
     });
   }, []);
+
+  // Auto-fetch dni dodatkowych przy wejściu na zakładkę 'parking'
+  useEffect(() => {
+    if (tab === 'parking' && values['admin_url'] && values['admin_token']) {
+      fetchExtraDays();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, values['admin_url'], values['admin_token']]);
 
   const set = (key: string, val: string) => setValues(v => ({ ...v, [key]: val }));
   const bool = (key: string) => values[key] === 'true';
@@ -168,6 +193,122 @@ export default function Settings({
     setTestingEmail(false);
   };
 
+  // Phase B \u2014 wy\u015blij ustawienia parkingu do chmury (Vercel /api/admin?action=settings_save)
+  const handleCloudSaveParking = async () => {
+    setCloudSaving(true);
+    setCloudResult(null);
+    try {
+      const adminUrl = (values['admin_url'] ?? '').trim().replace(/\/+$/, '');
+      const adminToken = (values['admin_token'] ?? '').trim();
+      if (!adminUrl) throw new Error('Brak admin_url (zak\u0142adka Po\u0142\u0105czenia)');
+      if (!adminToken) throw new Error('Brak admin_token (poni\u017cej)');
+
+      const PARKING_KEYS = [
+        'rate_basic', 'rate_reservation', 'rate_after_hours',
+        'open_from', 'open_to', 'open_days',
+        'spots_available', 'komunikat',
+        'owner_phone', 'owner_email', 'parking_address', 'parking_name', 'parking_nip',
+        'parking_capacity',
+      ];
+      const settings: Record<string, string> = {};
+      for (const k of PARKING_KEYS) {
+        if (values[k] != null && values[k] !== '') settings[k] = values[k];
+      }
+
+      const resp = await fetch(`${adminUrl}/api/admin`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${adminToken}`,
+        },
+        body: JSON.stringify({ action: 'settings_save', settings }),
+      });
+      const json = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(json?.error || `HTTP ${resp.status}`);
+      }
+      // Lokalnie te\u017c utrwal (cache offline)
+      const store = await getStore();
+      for (const [k, v] of Object.entries(settings)) await store.set(k, v);
+      await store.save();
+      await logAction('settings_saved', { tab: 'parking', cloud: true, keys: Object.keys(settings) });
+      setCloudResult({ ok: true });
+      setTimeout(() => setCloudResult(null), 3000);
+    } catch (e) {
+      setCloudResult({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setCloudSaving(false);
+    }
+  };
+
+  // ── Dni dodatkowe (tabela extra_open_days w Supabase, przez /api/admin) ──
+  const adminCall = async (body: object) => {
+    const adminUrl = (values['admin_url'] ?? '').trim().replace(/\/+$/, '');
+    const adminToken = (values['admin_token'] ?? '').trim();
+    if (!adminUrl) throw new Error('Brak admin_url (zakładka Połączenia)');
+    if (!adminToken) throw new Error('Brak admin_token (zakładka Połączenia)');
+    const resp = await fetch(`${adminUrl}/api/admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
+      body: JSON.stringify(body),
+    });
+    const json = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
+    return json;
+  };
+
+  const fetchExtraDays = async () => {
+    const adminUrl = (values['admin_url'] ?? '').trim().replace(/\/+$/, '');
+    const adminToken = (values['admin_token'] ?? '').trim();
+    if (!adminUrl || !adminToken) return;
+    setExtraDaysLoading(true);
+    setExtraDaysError(null);
+    try {
+      const resp = await fetch(`${adminUrl}/api/admin?action=extra_open_days`, {
+        headers: { 'Authorization': `Bearer ${adminToken}` },
+      });
+      const json = await resp.json();
+      if (!resp.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
+      setExtraDays(json.extraOpenDays || []);
+    } catch (e) {
+      setExtraDaysError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setExtraDaysLoading(false);
+    }
+  };
+
+  // ISO YYYY-MM-DD (z input[type=date]) → DD.MM.YYYY (format wymagany przez API)
+  const isoToPlDate = (iso: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    return m ? `${m[3]}.${m[2]}.${m[1]}` : iso;
+  };
+  const plToIsoDate = (pl: string) => {
+    const m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(pl);
+    return m ? `${m[3]}-${m[2]}-${m[1]}` : pl;
+  };
+
+  const addExtraDay = async () => {
+    if (!extraDayInput) return;
+    setExtraDaysError(null);
+    try {
+      await adminCall({ action: 'add_extra_day', date: isoToPlDate(extraDayInput), note: null });
+      setExtraDayInput('');
+      await fetchExtraDays();
+    } catch (e) {
+      setExtraDaysError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const removeExtraDay = async (id: number) => {
+    setExtraDaysError(null);
+    try {
+      await adminCall({ action: 'remove_extra_day', id });
+      await fetchExtraDays();
+    } catch (e) {
+      setExtraDaysError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
   const handleChangePassword = async () => {
     setPassError('');
     if (!newPass)             { setPassError('Wpisz nowe haslo.'); return; }
@@ -187,24 +328,27 @@ export default function Settings({
   return (
     <div className="h-full flex flex-col">
       <div className="px-6 pt-5 pb-0 flex-shrink-0">
-        <h1 className="text-xl font-bold text-[var(--color-text)]">Ustawienia</h1>
-        <p className="text-[var(--color-text-muted)] text-xs mt-0.5">Konfiguracja Parking.OS</p>
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-2xl font-bold text-[var(--color-text)] tracking-tight">Ustawienia</h1>
+          <span className="text-[var(--color-text-muted)] text-xs">Konfiguracja Parking.OS</span>
+        </div>
 
-        <div className="flex gap-0.5 mt-4 border-b border-[var(--color-border)]">
+        <div className="flex gap-1 mt-5 overflow-x-auto pb-px">
           {TABS.map(({ id, label, Icon }) => (
             <button key={id} onClick={() => setTab(id)}
-              className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px whitespace-nowrap
+              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-t-[var(--radius-md)] transition-all whitespace-nowrap relative
                 ${tab === id
-                  ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
-                  : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:border-slate-500'}`}>
-              <Icon size={14} />
+                  ? 'bg-[var(--color-surface)] text-[var(--color-accent)] border border-[var(--color-border)] border-b-[var(--color-surface)] -mb-px shadow-[var(--shadow-sm)]'
+                  : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] border border-transparent'}`}>
+              <Icon size={15} />
               {label}
             </button>
           ))}
         </div>
+        <div className="border-b border-[var(--color-border)]" />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+      <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
 
         {tab === 'cameras' && <>
           {CAM_DEFAULTS.map(({ id, defaultName }, idx) => (
@@ -415,6 +559,11 @@ export default function Settings({
                 value={values['admin_url'] ?? ''}
                 onChange={e => set('admin_url', e.target.value)}
                 placeholder="https://twoja-domena.pl/zaplecze-mk" />
+              <Input label="ADMIN_TOKEN (Bearer — z env Vercel)"
+                type="password"
+                value={values['admin_token'] ?? ''}
+                onChange={e => set('admin_token', e.target.value)}
+                placeholder="dlugi sekret" />
               <Input label="URL panelu iPad (PWA)"
                 value={values['pwa_url'] ?? ''}
                 onChange={e => set('pwa_url', e.target.value)}
@@ -422,6 +571,203 @@ export default function Settings({
             </div>
           </Card>
         </>}
+
+        {tab === 'parking' && (() => {
+          const isAvailable = (values['spots_available'] ?? 'true') !== 'false';
+          let kom: { tytul?: string; tresc?: string; od?: string; do?: string; aktywny?: boolean } = {};
+          try { kom = JSON.parse(values['komunikat'] ?? '{}'); } catch { /* empty */ }
+          const updateKom = (patch: Partial<typeof kom>) => {
+            set('komunikat', JSON.stringify({ ...kom, ...patch }));
+          };
+          const days = [
+            { v: '1', l: 'Pn' }, { v: '2', l: 'Wt' }, { v: '3', l: 'Śr' },
+            { v: '4', l: 'Cz' }, { v: '5', l: 'Pt' }, { v: '6', l: 'Sb' }, { v: '0', l: 'Nd' },
+          ];
+          const csv = (values['open_days'] ?? '0,5,6').split(',').map(s => s.trim()).filter(Boolean);
+          return <>
+            {/* STICKY TOOLBAR — najczęstsza zmiana, zawsze widoczny */}
+            <div className="sticky -top-5 -mx-6 px-6 py-3 z-10 bg-[var(--color-bg)]/95 backdrop-blur-md border-b border-[var(--color-border)] mb-2">
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="flex items-center gap-2 mr-2">
+                  <Car size={16} className="text-[var(--color-text-muted)]" />
+                  <span className="text-xs font-bold uppercase tracking-wide text-[var(--color-text-muted)]">Status walk-in</span>
+                </div>
+                <button
+                  onClick={() => set('spots_available', 'true')}
+                  className={`flex-1 sm:flex-none px-4 py-2 rounded-[var(--radius-md)] font-bold text-sm transition-all duration-150 border-2
+                    ${isAvailable
+                      ? 'bg-[var(--color-success-bg)] border-[var(--color-success)] text-[var(--color-success)] shadow-[var(--shadow-sm)]'
+                      : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-success)] hover:text-[var(--color-success)]'}`}>
+                  ✓ Wolne miejsca
+                </button>
+                <button
+                  onClick={() => set('spots_available', 'false')}
+                  className={`flex-1 sm:flex-none px-4 py-2 rounded-[var(--radius-md)] font-bold text-sm transition-all duration-150 border-2
+                    ${!isAvailable
+                      ? 'bg-[var(--color-danger-bg)] border-[var(--color-danger)] text-[var(--color-danger)] shadow-[var(--shadow-sm)]'
+                      : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]'}`}>
+                  ✕ Brak miejsc
+                </button>
+                <Badge variant={isAvailable ? 'success' : 'danger'} className="ml-auto">
+                  {isAvailable ? 'klienci mogą przyjechać' : 'parking pełny'}
+                </Badge>
+              </div>
+            </div>
+
+            {/* 2 KOLUMNY — Cennik / Pojemność / Godziny / Dni */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+              <Card title="Cennik" subtitle="Stawki widoczne na stronie www i w czacie bota" icon={<Banknote size={18} />}>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input label="Bez rezerwacji"
+                    value={values['rate_basic'] ?? ''}
+                    onChange={e => set('rate_basic', e.target.value)}
+                    placeholder="20" hint="zł / dobę" />
+                  <Input label="Z rezerwacją"
+                    value={values['rate_reservation'] ?? ''}
+                    onChange={e => set('rate_reservation', e.target.value)}
+                    placeholder="25" hint="zł / dobę" />
+                </div>
+              </Card>
+
+              <Card title="Pojemność" subtitle="Liczba miejsc dostępnych do rezerwacji online" icon={<MapPin size={18} />}>
+                <Input label="Miejsca z rezerwacją"
+                  type="number"
+                  value={values['parking_capacity'] ?? ''}
+                  onChange={e => set('parking_capacity', e.target.value)}
+                  placeholder="10"
+                  hint="reszta klientów przyjeżdża walk-in (cena podstawowa)" />
+              </Card>
+
+              <Card title="Godziny otwarcia" subtitle="Codziennie obowiązujące" icon={<Clock size={18} />}>
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <Input label="Otwarcie"
+                    value={values['open_from'] ?? ''}
+                    onChange={e => set('open_from', e.target.value)}
+                    placeholder="08:00" />
+                  <Input label="Zamknięcie"
+                    value={values['open_to'] ?? ''}
+                    onChange={e => set('open_to', e.target.value)}
+                    placeholder="19:00" />
+                </div>
+                <SectionTitle>Dni pracujące</SectionTitle>
+                <div className="flex flex-wrap gap-1.5">
+                  {days.map(({ v, l }) => {
+                    const active = csv.includes(v);
+                    return (
+                      <button key={v}
+                        onClick={() => {
+                          const next = active ? csv.filter(x => x !== v) : [...csv, v];
+                          next.sort();
+                          set('open_days', next.join(','));
+                        }}
+                        className={`w-11 h-11 rounded-[var(--radius-md)] text-sm font-bold border-2 transition-all duration-150
+                          ${active
+                            ? 'bg-[var(--color-accent-bg)] border-[var(--color-accent)] text-[var(--color-accent)] shadow-[var(--shadow-sm)]'
+                            : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-accent)]'}`}>
+                        {l}
+                      </button>
+                    );
+                  })}
+                </div>
+              </Card>
+
+              <Card title="Dni dodatkowe" subtitle="Jednorazowe wyjątki — np. święto, długi weekend" icon={<CalendarPlus size={18} />}>
+                <div className="flex gap-2 mb-3">
+                  <input
+                    type="date"
+                    value={extraDayInput}
+                    onChange={e => setExtraDayInput(e.target.value)}
+                    className="flex-1 px-3.5 py-2.5 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] text-sm transition-all hover:border-[var(--color-border-strong)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]/40 focus:border-[var(--color-accent)]"
+                  />
+                  <Button size="sm" variant="primary" onClick={addExtraDay} disabled={!extraDayInput || extraDaysLoading}>
+                    + Dodaj
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={fetchExtraDays} disabled={extraDaysLoading} title="Odśwież">⟳</Button>
+                </div>
+                {extraDaysError && <p className="text-xs text-[var(--color-danger)] mb-2 font-medium">Błąd: {extraDaysError}</p>}
+                {extraDaysLoading && <p className="text-xs text-[var(--color-text-muted)] mb-2">Ładowanie...</p>}
+                <div className="flex flex-wrap gap-1.5 min-h-[2rem]">
+                  {extraDays.length === 0 && !extraDaysLoading && (
+                    <span className="text-xs text-[var(--color-text-muted)] opacity-60 italic">brak dodatkowych dni</span>
+                  )}
+                  {extraDays.map(d => (
+                    <Badge key={d.id ?? d.date} variant="accent" className="!px-2.5 !py-1 !text-xs">
+                      {plToIsoDate(d.date)}
+                      <button
+                        onClick={() => d.id != null && removeExtraDay(d.id)}
+                        className="ml-1 opacity-60 hover:opacity-100 font-bold text-[var(--color-danger)]"
+                        aria-label={`Usuń ${d.date}`}>×</button>
+                    </Badge>
+                  ))}
+                </div>
+              </Card>
+            </div>
+
+            {/* KOMUNIKAT — pełna szerokość, oddzielnie */}
+            <Card
+              title="Komunikat na stronie WWW"
+              subtitle="Wyświetla się żółtym banerem — np. zmiana godzin, majówka, awaria"
+              icon={<Megaphone size={18} />}
+              variant={kom.aktywny ? 'warning' : 'default'}
+              action={
+                <button
+                  onClick={() => updateKom({ aktywny: !kom.aktywny })}
+                  className={`px-3 py-1.5 rounded-[var(--radius-md)] font-bold text-xs border-2 transition-all
+                    ${kom.aktywny
+                      ? 'bg-[var(--color-warning)] border-[var(--color-warning)] text-white'
+                      : 'border-[var(--color-border)] text-[var(--color-text-muted)] hover:border-[var(--color-warning)] hover:text-[var(--color-warning)]'}`}>
+                  {kom.aktywny ? '● aktywny' : '○ nieaktywny'}
+                </button>
+              }>
+              <div className="space-y-3">
+                <Input label="Tytuł"
+                  value={kom.tytul ?? ''}
+                  onChange={e => updateKom({ tytul: e.target.value })}
+                  placeholder="np. Zmiana godzin otwarcia – Majówka" />
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wide">Treść</label>
+                  <textarea
+                    value={kom.tresc ?? ''}
+                    onChange={e => updateKom({ tresc: e.target.value })}
+                    rows={3}
+                    placeholder="Treść komunikatu widoczna na stronie..."
+                    className="w-full px-3.5 py-2.5 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text)] text-sm resize-none transition-all hover:border-[var(--color-border-strong)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]/40 focus:border-[var(--color-accent)]" />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input label="Widoczny od" type="datetime-local"
+                    value={kom.od ?? ''}
+                    onChange={e => updateKom({ od: e.target.value })} />
+                  <Input label="Widoczny do" type="datetime-local"
+                    value={kom.do ?? ''}
+                    onChange={e => updateKom({ do: e.target.value })} />
+                </div>
+              </div>
+            </Card>
+
+            {/* ZAPIS — pełna szerokość */}
+            <Card
+              variant={cloudResult?.ok ? 'success' : 'accent'}
+              title="Wyślij zmiany do chmury"
+              subtitle="Bot, widget czatu i strona WWW od razu zobaczą nowe wartości"
+              icon={cloudResult?.ok ? <Cloud size={18} /> : <CloudOff size={18} />}>
+              <div className="flex items-center gap-3 flex-wrap">
+                <Button variant="primary" size="lg" onClick={handleCloudSaveParking} loading={cloudSaving}>
+                  <Cloud size={18} />
+                  Zapisz w chmurze
+                </Button>
+                {cloudResult && (
+                  <span className={`text-sm font-semibold ${cloudResult.ok ? 'text-[var(--color-success)]' : 'text-[var(--color-danger)]'}`}>
+                    {cloudResult.ok ? '✓ Zapisano!' : `✕ Błąd: ${cloudResult.error}`}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-[var(--color-text-muted)] mt-3 opacity-70">
+                Wymaga skonfigurowanego URL panelu CMS i ADMIN_TOKEN (zakładka <strong>Połączenia</strong>).
+                Status walk-in i komunikat są częścią tego zapisu.
+              </p>
+            </Card>
+          </>;
+        })()}
 
         {tab === 'accounts' && isSuperAdmin && (
           <AccountManager />

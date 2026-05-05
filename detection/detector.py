@@ -29,7 +29,7 @@ from ultralytics import YOLO
 
 # ── Konfiguracja ──────────────────────────────────────────────────────────────
 VEHICLE_CLASSES = {2: 'car', 5: 'bus', 7: 'truck'}   # COCO class IDs
-CONF_THRESHOLD  = 0.35
+CONF_THRESHOLD  = 0.25     # obniżone z 0.35 — lepsze wykrywanie aut z dużej odległości
 SAMPLE_INTERVAL = 0.33     # sekund między klatkami (~3 fps) — szybszy sampling dla bramy
 MAX_DISAPPEARED = 10       # klatek nieobecności przed usunięciem śladu
 MAX_DISTANCE    = 250      # piksele — maks odległość do przypisania śladu (zwiększone dla 3fps)
@@ -217,6 +217,8 @@ def main():
                         help='ROI jako ułamki: x1,y1,x2,y2')
     parser.add_argument('--line',  type=float, default=0.6,
                         help='Pozycja linii detekcji w ROI (0.0-1.0)')
+    parser.add_argument('--imgsz', type=int,   default=640,
+                        help='Rozmiar obrazu dla YOLO (default: 640, niższe = szybciej ale gorzej wykrywa z dystansu)')
     args = parser.parse_args()
 
     conn = init_db(args.db)
@@ -228,10 +230,11 @@ def main():
         'today_out':  today_out,
         'on_parking': max(0, today_in - today_out),
         'last_event': None,
-        'fps':        0.0,
-        'error':      None,
-        'roi':        args.roi,
-        'line':       args.line,
+        'fps':           0.0,
+        'error':         None,
+        'roi':           args.roi,
+        'line':          args.line,
+        'detections':    0,   # liczba detekcji YOLO w ostatniej klatce (debug)
     }
 
     start_http_server(args.port, state, conn)
@@ -288,7 +291,7 @@ def main():
             conf=CONF_THRESHOLD,
             classes=list(VEHICLE_CLASSES.keys()),
             verbose=False,
-            imgsz=320       # mniejszy rozmiar = szybciej na słabym CPU
+            imgsz=args.imgsz,  # konfigurowalne — wyższe = lepsza detekcja z dystansu
         )
         state['fps'] = round(1.0 / max(0.001, time.time() - t0), 2)
 
@@ -299,6 +302,7 @@ def main():
                 cx = int((bx1 + bx2) / 2)
                 cy = int((by1 + by2) / 2)
                 centroids.append((cx, cy))
+        state['detections'] = len(centroids)
 
         # ── Śledzenie ──
         matches, gone = tracker.update(centroids)
@@ -329,9 +333,12 @@ def main():
         # (first_y po jednej stronie, last_y po drugiej). Działa nawet gdy auto
         # przejeżdżało tak szybko, że nigdy nie było widoczne na obu stronach linii
         # w tym samym kroku.
+        # UWAGA: stosujemy tylko jeśli Metoda 1 nie zliczyła tego śladu —
+        #        zapobiega podwójnemu liczeniu.
         for obj_id, first_y, last_y in gone:
+            already_counted = obj_id in counted
             counted.discard(obj_id)   # zwolnij slot gdy ślad znika
-            if first_y is None:
+            if already_counted or first_y is None:
                 continue
             # Sprawdź czy trajektoria przeszła przez linię
             crossed_down = first_y < line_y and last_y >= line_y   # wjazd

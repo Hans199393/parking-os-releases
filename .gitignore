@@ -22,3 +22,19 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Sesje Detection LPR / serializowane stany kamer (mogą zawierać dane)
+sess*.json
+output.json
+*.session.json
+
+# Sekrety i konfiguracja środowiska
+.env
+.env.*
+!.env.example
+rtsp-proxy/.env
+
+# Build artefakty Rust/Tauri (jeśli nie są w src-tauri/target)
+src-tauri/target/
+src-tauri/gen/schemas/
+

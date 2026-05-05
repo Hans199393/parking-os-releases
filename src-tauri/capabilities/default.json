@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
+  "description": "Capability for the main window. FS operations restricted to AppData/parking-backups/.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -19,6 +19,13 @@
     "fs:allow-mkdir",
     "fs:allow-read-dir",
     "fs:allow-remove",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPDATA/parking-backups/**" },
+        { "path": "$APPDATA/parking-backups" }
+      ]
+    },
     "store:default",
     "store:allow-get",
     "store:allow-set",
@@ -26,3 +33,4 @@
     "store:allow-save"
   ]
 }
+

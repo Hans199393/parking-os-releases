@@ -27,7 +27,7 @@ export default function RTSPPlayer({ streamUrl, label, fill }: { streamUrl: stri
     const MAX_RETRIES = 99; // praktycznie bez limitu — proxy restartuje co 5s
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    // Stall watchdog — jeśli obraz stoi >6s, wymuś live edge
+    // Stall watchdog — jeśli obraz stoi >2s, wymuś live edge
     let lastTime = -1;
     let stallTicks = 0;
     const watchdog = setInterval(() => {
@@ -35,7 +35,7 @@ export default function RTSPPlayer({ streamUrl, label, fill }: { streamUrl: stri
       if (video.paused && !video.ended) { video.play().catch(() => {}); return; }
       if (video.currentTime === lastTime && !video.paused) {
         stallTicks++;
-        if (stallTicks >= 2) {
+        if (stallTicks >= 1) {
           if (video.seekable.length > 0)
             video.currentTime = video.seekable.end(video.seekable.length - 1);
           stallTicks = 0;
@@ -44,7 +44,7 @@ export default function RTSPPlayer({ streamUrl, label, fill }: { streamUrl: stri
         stallTicks = 0;
       }
       lastTime = video.currentTime;
-    }, 3000);
+    }, 2000);
 
     async function initHls() {
       if (destroyed) return;
@@ -57,13 +57,14 @@ export default function RTSPPlayer({ streamUrl, label, fill }: { streamUrl: stri
         if (Hls.isSupported()) {
           const hlsInstance = new Hls({
             enableWorker: true,
-            lowLatencyMode: true,
-            liveSyncDurationCount: 1,
-            liveMaxLatencyDurationCount: 2,
-            liveBackBufferLength: 0,
+            lowLatencyMode: false,
+            liveSyncDurationCount: 2,
+            liveMaxLatencyDurationCount: 4,
             maxBufferLength: 4,
             maxMaxBufferLength: 8,
             backBufferLength: 0,
+            highBufferWatchdogPeriod: 2,
+            nudgeMaxRetry: 5,
             // Dużo prób ładowania manifestu — proxy restartuje ~5s po crashu ffmpeg
             manifestLoadingMaxRetry: 30,
             manifestLoadingRetryDelay: 2000,

@@ -17,7 +17,8 @@ import { logPageView, logLogout } from './lib/logger';
 import { getStore } from './lib/store';
 import { applyAccentColor, ACCENT_COLORS } from './components/Settings/Settings';
 import { signOut } from './lib/auth';
-import { getCurrentUser, type AppUser } from './lib/session';
+import { getCurrentUser, setCurrentUser as setSessionUser, SUPERADMIN_EMAIL, ALL_PAGES, type AppUser } from './lib/session';
+import { getSupabaseClient } from './lib/supabase';
 import './index.css';
 
 type Theme = 'light' | 'dark' | 'system';
@@ -93,6 +94,26 @@ export default function App() {
     });
     loadCameraUrls();
   }, [loadCameraUrls]);
+
+  // Odtwórz currentUser z sesji Supabase gdy _user jest null (np. po hot-reload w dev
+  // lub gdy sessionStorage zachował flagę authed ale moduł session.ts stracił stan).
+  useEffect(() => {
+    if (!authenticated || getCurrentUser()) return;
+    getSupabaseClient().then(sb => sb.auth.getUser()).then(({ data }) => {
+      if (!data.user) return;
+      const isSA = data.user.email?.toLowerCase() === SUPERADMIN_EMAIL;
+      const meta = (data.user.user_metadata ?? {}) as { permissions?: string[] };
+      const restored: AppUser = {
+        id: data.user.id,
+        email: data.user.email!,
+        role: isSA ? 'superadmin' : 'operator',
+        permissions: isSA ? [...ALL_PAGES] : (meta.permissions ?? ['dashboard', 'cameras']),
+      };
+      setSessionUser(restored);
+      setCurrentUser(restored);
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authenticated]);
 
   const handleThemeChange = async (t: Theme) => {
     setTheme(t);

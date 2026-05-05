@@ -14,6 +14,7 @@ interface DetectorStatus {
   last_event: { direction: 'in' | 'out'; ts: string } | null;
   fps: number;
   error: string | null;
+  detections: number; // liczba obiektów wykrytych przez YOLO w ostatniej klatce
 }
 
 const DETECTOR_PORT = 8890;
@@ -435,6 +436,10 @@ export default function DetectorPanel({ cam1RtspUrl, cam1SnapshotUrl, cam1HlsUrl
               <span className="flex items-center gap-1 text-green-400">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
                 {status.fps}fps
+                {status.detections > 0
+                  ? <span className="text-cyan-400 ml-0.5" title="Wykryte obiekty w tej klatce">({status.detections}obj)</span>
+                  : <span className="text-slate-500 ml-0.5" title="Brak wykryć YOLO — sprawdź ROI i odległość">(?obj)</span>
+                }
               </span>
             ) : active && status?.error ? (
               <span className="text-red-400 flex items-center gap-1"><AlertTriangle size={10} /> Błąd</span>

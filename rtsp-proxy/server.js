@@ -33,9 +33,9 @@ const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const cameras = [
   { id: 'cam1', rtsp: process.env.CAM1_RTSP || '', transcode: true,  transport: 'tcp',  viaMediamtx: false },
   // cam2 YCC365Plus C-P05: UDP RTSP, sesja zamykana przez kamerę co ~21s bez keepalive → mediamtx
-  { id: 'cam2', rtsp: process.env.CAM2_RTSP || '', transcode: true,  transport: 'udp',  viaMediamtx: true },
-  // cam3 YCC365Plus #2 / TAS-Tech firmware: TCP direct (mediamtx nie obsługuje), czeka na IDR
-  { id: 'cam3', rtsp: process.env.CAM3_RTSP || '', transcode: true,  transport: 'tcp',  viaMediamtx: false, tastech: true },
+  { id: 'cam2', rtsp: process.env.CAM2_RTSP || '', transcode: false, transport: 'udp',  viaMediamtx: true },
+  // cam3 YCC365Plus C-P05 (fizycznie trzecia kamera): UDP RTSP, sesja zamykana co ~21s → mediamtx keepalive
+  { id: 'cam3', rtsp: process.env.CAM3_RTSP || '', transcode: false, transport: 'udp',  viaMediamtx: true },
   { id: 'cam4', rtsp: process.env.CAM4_RTSP || '', transcode: false, transport: 'udp',  viaMediamtx: false },
 ].filter(c => c.rtsp);
 
@@ -321,15 +321,16 @@ function startCamera(cam) {
   // Kamera HEVC (cam1 IMOU) wymaga transkodowania → libx264
   // Kamera H.264 (cam2/3/4 YCC365Plus) — kopiujemy strumień bez transkodowania
   const videoArgs = cam.transcode
-    ? ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-b:v', '2M', '-vf', 'scale=1280:720']
+    ? ['-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency', '-b:v', '2M', '-vf', 'scale=1280:720',
+       '-g', '25', '-keyint_min', '25', '-force_key_frames', 'expr:gte(t,n_forced*1)']
     : ['-c:v', 'copy'];
 
   // isTcp already computed above (true when routing via mediamtx OR cam.transport==='tcp')
   const transportArgs = isTcp
     ? [
         '-rtsp_transport', 'tcp',
-        '-analyzeduration', cam.tastech ? '10000000' : '3000000',
-        '-probesize',       cam.tastech ? '10000000' : '3000000',
+        '-analyzeduration', cam.tastech ? '3000000' : '1000000',
+        '-probesize',       cam.tastech ? '3000000' : '1000000',
         '-fflags',          '+discardcorrupt+genpts+nobuffer',
         '-flags',           'low_delay',
         '-max_delay',       '0',
@@ -339,10 +340,14 @@ function startCamera(cam) {
       ]
     : [
         '-rtsp_transport', 'udp',
-        '-buffer_size',    '4096000',  // bufor UDP na ewentualne reorder pakietów
-        '-fflags',         '+discardcorrupt+genpts',
+        '-analyzeduration', '1000000',
+        '-probesize',       '1000000',
+        '-buffer_size',    '2097152',  // 2 MB UDP
+        '-fflags',         '+discardcorrupt+genpts+nobuffer',
+        '-flags',          'low_delay',
+        '-max_delay',      '0',
+        '-reorder_queue_size', '0',
         '-err_detect',     'ignore_err',
-        // '-use_wallclock_as_timestamps', '1', // odkomentuj jeśli DTS errors w logach
       ];
 
   const ffmpeg = spawn(FFMPEG, [
@@ -352,7 +357,7 @@ function startCamera(cam) {
     '-an',
     '-vsync', 'passthrough',
     '-f', 'hls',
-    '-hls_time', '2',
+    '-hls_time', '1',
     '-hls_list_size', '3',
     '-hls_flags', 'delete_segments+discont_start',
     '-hls_segment_filename', path.join(HLS_DIR, `${cam.id}_%03d.ts`),
