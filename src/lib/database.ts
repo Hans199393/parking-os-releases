@@ -83,6 +83,27 @@ async function initSchema() {
     await database.execute(`ALTER TABLE invoices_new RENAME TO invoices`);
   }
 
+  // Migration (Iter 11): add supplier + payment_method to invoices
+  try { await database.select('SELECT supplier FROM invoices LIMIT 1', []); }
+  catch { await database.execute(`ALTER TABLE invoices ADD COLUMN supplier TEXT`); }
+  try { await database.select('SELECT payment_method FROM invoices LIMIT 1', []); }
+  catch { await database.execute(`ALTER TABLE invoices ADD COLUMN payment_method TEXT`); }
+
+  // Iter 11: koszty cykliczne (stałe miesięczne / sezonowe / amortyzacja)
+  await database.execute(`
+    CREATE TABLE IF NOT EXISTS expenses_recurring (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      amount REAL NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('fixed','variable','amortization')),
+      active_months TEXT NOT NULL DEFAULT '1,2,3,4,5,6,7,8,9,10,11,12',
+      start_date TEXT,
+      end_date TEXT,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
+    );
+  `);
+
   // Migration: seed historical 2025 data (one-time, INSERT OR IGNORE — never overwrites existing)
   const existing2025 = await database.select<{cnt:number}[]>(
     `SELECT COUNT(*) as cnt FROM daily_revenue WHERE date LIKE '2025-%'`, []
@@ -329,6 +350,8 @@ export interface Invoice {
   amount: number;
   date: string;
   category: 'Us\u0142ugi' | 'Podatki' | 'Materia\u0142y' | 'Inwestycja';
+  supplier?: string;
+  payment_method?: 'gotówka' | 'karta' | 'przelew' | 'BLIK' | string;
   created_at?: string;
 }
 
@@ -344,16 +367,16 @@ export async function getMonthlyInvoices(year: number, month: number): Promise<I
 export async function addInvoice(invoice: Omit<Invoice, 'id' | 'created_at'>): Promise<void> {
   const database = await getDb();
   await database.execute(
-    'INSERT INTO invoices (name, amount, date, category) VALUES ($1, $2, $3, $4)',
-    [invoice.name, invoice.amount, invoice.date, invoice.category]
+    'INSERT INTO invoices (name, amount, date, category, supplier, payment_method) VALUES ($1, $2, $3, $4, $5, $6)',
+    [invoice.name, invoice.amount, invoice.date, invoice.category, invoice.supplier ?? null, invoice.payment_method ?? null]
   );
 }
 
 export async function updateInvoice(id: number, invoice: Omit<Invoice, 'id' | 'created_at'>): Promise<void> {
   const database = await getDb();
   await database.execute(
-    'UPDATE invoices SET name=$1, amount=$2, date=$3, category=$4 WHERE id=$5',
-    [invoice.name, invoice.amount, invoice.date, invoice.category, id]
+    'UPDATE invoices SET name=$1, amount=$2, date=$3, category=$4, supplier=$5, payment_method=$6 WHERE id=$7',
+    [invoice.name, invoice.amount, invoice.date, invoice.category, invoice.supplier ?? null, invoice.payment_method ?? null, id]
   );
 }
 
@@ -415,4 +438,70 @@ export async function exportAllData(): Promise<{revenues: DailyRevenue[], invoic
   const revenues = await database.select<DailyRevenue[]>('SELECT * FROM daily_revenue ORDER BY date');
   const invoices = await database.select<Invoice[]>('SELECT * FROM invoices ORDER BY date');
   return { revenues, invoices };
+}
+
+// ---------- Iter 11: Recurring expenses (koszty cykliczne) ----------
+
+export type RecurringKind = 'fixed' | 'variable' | 'amortization';
+
+export interface RecurringExpense {
+  id?: number;
+  name: string;
+  amount: number;
+  kind: RecurringKind;
+  active_months: string; // CSV np "1,2,3,...,12" lub "5,6,7,8,9"
+  start_date?: string | null;
+  end_date?: string | null;
+  notes?: string | null;
+  created_at?: string;
+}
+
+function isActiveInMonth(exp: RecurringExpense, year: number, month: number): boolean {
+  const ym = `${year}-${String(month).padStart(2, '0')}-01`;
+  if (exp.start_date && ym < exp.start_date.slice(0, 10)) return false;
+  if (exp.end_date && ym > exp.end_date.slice(0, 10)) return false;
+  const months = (exp.active_months || '').split(',').map(s => s.trim()).filter(Boolean);
+  return months.includes(String(month));
+}
+
+export async function getAllRecurringExpenses(): Promise<RecurringExpense[]> {
+  const database = await getDb();
+  return database.select<RecurringExpense[]>(
+    'SELECT * FROM expenses_recurring ORDER BY kind, name'
+  );
+}
+
+export async function getActiveRecurringExpenses(year: number, month: number): Promise<RecurringExpense[]> {
+  const all = await getAllRecurringExpenses();
+  return all.filter(e => isActiveInMonth(e, year, month));
+}
+
+export async function getRecurringMonthlyTotal(year: number, month: number): Promise<{ fixed: number; variable: number; amortization: number; total: number }> {
+  const active = await getActiveRecurringExpenses(year, month);
+  const sum = (kind: RecurringKind) => active.filter(e => e.kind === kind).reduce((s, e) => s + e.amount, 0);
+  const fixed = sum('fixed');
+  const variable = sum('variable');
+  const amortization = sum('amortization');
+  return { fixed, variable, amortization, total: fixed + variable + amortization };
+}
+
+export async function addRecurringExpense(exp: Omit<RecurringExpense, 'id' | 'created_at'>): Promise<void> {
+  const database = await getDb();
+  await database.execute(
+    'INSERT INTO expenses_recurring (name, amount, kind, active_months, start_date, end_date, notes) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+    [exp.name, exp.amount, exp.kind, exp.active_months, exp.start_date ?? null, exp.end_date ?? null, exp.notes ?? null]
+  );
+}
+
+export async function updateRecurringExpense(id: number, exp: Omit<RecurringExpense, 'id' | 'created_at'>): Promise<void> {
+  const database = await getDb();
+  await database.execute(
+    'UPDATE expenses_recurring SET name=$1, amount=$2, kind=$3, active_months=$4, start_date=$5, end_date=$6, notes=$7 WHERE id=$8',
+    [exp.name, exp.amount, exp.kind, exp.active_months, exp.start_date ?? null, exp.end_date ?? null, exp.notes ?? null, id]
+  );
+}
+
+export async function deleteRecurringExpense(id: number): Promise<void> {
+  const database = await getDb();
+  await database.execute('DELETE FROM expenses_recurring WHERE id = $1', [id]);
 }

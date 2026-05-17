@@ -1,6 +1,15 @@
-import { useEffect, useState, useRef } from 'react';
-import { Camera, CalendarDays, Bell, Car, AlertTriangle, X } from 'lucide-react';
-import { getReservationsForDate, getExtraOpenDays, getBotAlerts, resolveBotAlert, type BotAlert } from '../../lib/supabase';
+import { useEffect, useState, useRef, useMemo } from 'react';
+import {
+  Camera, CalendarDays, Bell, Car, AlertTriangle, X,
+  Plus, Wallet, ScrollText, TrendingUp, Sparkles, Activity, CloudSun,
+} from 'lucide-react';
+import {
+  getReservationsForDate, getExtraOpenDays, getBotAlerts, resolveBotAlert,
+  getReservationCountByMonth, getBannedVehicles, getAdminLogs,
+  type BotAlert, type AdminLog,
+} from '../../lib/supabase';
+import { getMonthlyRevenue } from '../../lib/database';
+import { usePerm } from '../../lib/usePerm';
 import { Spinner } from '../shared/UI';
 import { Page } from '../Sidebar/Sidebar';
 import RTSPPlayer from '../Cameras/RTSPPlayer';
@@ -106,6 +115,7 @@ interface DashboardProps {
 }
 
 export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam2HlsUrl, cam3HlsUrl, cam4HlsUrl }: DashboardProps) {
+  const perm = usePerm();
   const today = new Date().toISOString().split('T')[0];
   const [todayRes, setTodayRes] = useState<{ registration: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,6 +124,12 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
   const [onParking, setOnParking] = useState<number | null>(null);
   const [todayIn, setTodayIn]   = useState<number | null>(null);
   const [botAlerts, setBotAlerts] = useState<BotAlert[]>([]);
+  // Iter 7: KPI / sparkline / orzeł historia
+  const [monthRevenue, setMonthRevenue] = useState<number | null>(null);
+  const [weekCounts, setWeekCounts] = useState<number[]>([]); // ostatnie 7 dni (od najstarszego)
+  const [bansActive, setBansActive] = useState<number | null>(null);
+  const [orzelLogs, setOrzelLogs] = useState<AdminLog[]>([]);
+  const detectorOk = onParking !== null;
   const detectorPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const alertPollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -160,6 +176,41 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
       .catch(() => setTodayRes([]))
       .finally(() => setLoading(false));
   }, [today, newReservations]);
+
+  // Iter 7: KPI snapshot — przychód miesiąca, 7 dni rezerwacji, bany, ostatnie logi
+  useEffect(() => {
+    let cancelled = false;
+    async function loadKpi() {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth() + 1;
+      try {
+        const [revs, monthCounts, bans, logs] = await Promise.all([
+          getMonthlyRevenue(year, month).catch(() => []),
+          getReservationCountByMonth(year, month).catch(() => ({} as Record<string, number>)),
+          getBannedVehicles().catch(() => []),
+          // Pobieramy 30 ostatnich logów kategorii 'chat' i filtrujemy po stronie klienta
+          getAdminLogs('chat', 30).catch(() => []),
+        ]);
+        if (cancelled) return;
+        const total = revs.reduce((s, r) => s + (r.total ?? 0), 0);
+        setMonthRevenue(total);
+        const counts: number[] = [];
+        for (let i = 6; i >= 0; i--) {
+          const d = new Date();
+          d.setDate(d.getDate() - i);
+          const iso = d.toISOString().split('T')[0];
+          counts.push(monthCounts[iso] ?? 0);
+        }
+        setWeekCounts(counts);
+        setBansActive(bans.filter(b => b.is_banned).length);
+        setOrzelLogs(logs.filter(l => l.action === 'orzel_turn').slice(0, 5));
+      } catch { /* noop */ }
+    }
+    void loadKpi();
+    const iv = setInterval(loadKpi, 60_000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [newReservations]);
 
   useEffect(() => {
     async function loadWeather() {
@@ -215,6 +266,20 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
   });
 
+  // Iter 7: agregaty + sparkline
+  const week7Total = useMemo(() => weekCounts.reduce((a, b) => a + b, 0), [weekCounts]);
+  const week7Max   = useMemo(() => Math.max(1, ...weekCounts), [weekCounts]);
+  const fmtPLN = (v: number) => v.toLocaleString('pl-PL', { style: 'currency', currency: 'PLN', maximumFractionDigits: 0 });
+  const monthLabel = new Date().toLocaleDateString('pl-PL', { month: 'long' });
+
+  const QUICK_ACTIONS: { perm: string; label: string; icon: React.ReactNode; page: Page; accent: string; onBefore?: () => void }[] = [
+    { perm: 'reservations.create', label: 'Nowa rezerwacja', icon: <Plus size={14} />,           page: 'reservations', accent: 'from-emerald-500/20 to-emerald-500/5 border-emerald-500/30 text-emerald-300' },
+    { perm: 'finances.add_income', label: 'Wpisz przychód',  icon: <Wallet size={14} />,         page: 'finances',     accent: 'from-amber-500/20 to-amber-500/5 border-amber-500/30 text-amber-300' },
+    { perm: 'chat.use',            label: 'Zapytaj Orła',    icon: <Sparkles size={14} />,       page: 'chat',         accent: 'from-violet-500/20 to-violet-500/5 border-violet-500/30 text-violet-300', onBefore: () => sessionStorage.setItem('chat_initial_tab', 'asystent') },
+    { perm: 'logs.view',           label: 'Zobacz logi',     icon: <ScrollText size={14} />,    page: 'logs',         accent: 'from-blue-500/20 to-blue-500/5 border-blue-500/30 text-blue-300' },
+  ];
+  const visibleActions = QUICK_ACTIONS.filter(a => perm.has(a.perm));
+
   return (
     <div className="p-4 h-full flex flex-col overflow-hidden">
       {/* Header row */}
@@ -235,6 +300,103 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
           </div>
         )}
       </div>
+
+      {/* Iter 7: KPI Strip */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3 flex-shrink-0">
+        {/* KPI 1: Wjazdy dziś (z detektora) */}
+        <button
+          onClick={() => onNavigate('cameras')}
+          className="glass-strong rounded-[var(--radius-lg)] p-3 text-left animate-slideUp hover:scale-[1.02] transition-transform"
+          title="Liczba pojazdów wykrytych przez detektor dzisiaj"
+        >
+          <div className="flex items-center justify-between mb-0.5">
+            <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold">Wjazdy dziś</span>
+            <Car size={14} className="text-teal-400 opacity-70" />
+          </div>
+          <div className="flex items-end justify-between gap-2">
+            <div className="hero-number text-2xl font-bold leading-none">{todayIn ?? '…'}</div>
+            <div className="text-[10px] text-[var(--color-text-muted)] pb-0.5">na parkingu: <span className="text-teal-300 font-bold">{onParking ?? '—'}</span></div>
+          </div>
+        </button>
+
+        <button
+          onClick={() => perm.has('finances.view') && onNavigate('finances')}
+          disabled={!perm.has('finances.view')}
+          className="glass-strong rounded-[var(--radius-lg)] p-3 text-left animate-slideUp hover:scale-[1.02] transition-transform disabled:opacity-60 disabled:hover:scale-100"
+        >
+          <div className="flex items-center justify-between mb-0.5">
+            <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold capitalize">Przychód · {monthLabel}</span>
+            <Wallet size={14} className="text-amber-400 opacity-70" />
+          </div>
+          <div className="hero-number text-2xl font-bold leading-none">{monthRevenue == null ? '…' : fmtPLN(monthRevenue)}</div>
+        </button>
+
+        <button
+          onClick={() => onNavigate('reservations')}
+          className="glass-strong rounded-[var(--radius-lg)] p-3 text-left animate-slideUp hover:scale-[1.02] transition-transform"
+        >
+          <div className="flex items-center justify-between mb-0.5">
+            <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold">Ostatnie 7 dni · rezerwacje</span>
+            <TrendingUp size={14} className="text-blue-400 opacity-70" />
+          </div>
+          <div className="flex items-end justify-between gap-2">
+            <div className="hero-number text-2xl font-bold leading-none">{week7Total}</div>
+            {weekCounts.length === 7 && (
+              <div className="flex items-end gap-[2px] h-7 flex-shrink-0" title={weekCounts.map((c, i) => {
+                const d = new Date(); d.setDate(d.getDate() - (6 - i));
+                return `${d.toLocaleDateString('pl-PL', { weekday: 'short', day: 'numeric' })}: ${c}`;
+              }).join(' • ')}>
+                {weekCounts.map((c, i) => (
+                  <div
+                    key={i}
+                    className={`w-2 rounded-sm ${i === 6 ? 'bg-[var(--color-accent)]' : 'bg-blue-500/60'}`}
+                    style={{ height: `${Math.max(8, (c / week7Max) * 28)}px` }}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </button>
+
+        {/* KPI 4: Pogoda jutro / najbliższy dzień otwarty (info na nadchodzący dzień) */}
+        <div
+          className="glass-strong rounded-[var(--radius-lg)] p-3 animate-slideUp"
+          title="Prognoza dla najbliższego dnia otwarcia parkingu"
+        >
+          <div className="flex items-center justify-between mb-0.5">
+            <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold">
+              {weatherWidgets[1] ? `Prognoza · ${weatherWidgets[1].label}` : 'Pogoda — następny otwarty'}
+            </span>
+            <CloudSun size={14} className="text-sky-400 opacity-70" />
+          </div>
+          {weatherWidgets[1] ? (
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-3xl leading-none">{weatherWidgets[1].emoji}</span>
+                <div className="hero-number text-2xl font-bold leading-none">{weatherWidgets[1].maxTemp}°C</div>
+              </div>
+              <div className="text-[10px] text-[var(--color-text-muted)] text-right max-w-[100px] truncate">{weatherWidgets[1].description}</div>
+            </div>
+          ) : (
+            <div className="text-xs text-[var(--color-text-muted)] mt-1">Brak prognozy</div>
+          )}
+        </div>
+      </div>
+
+      {/* Iter 7: Quick Actions */}
+      {visibleActions.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3 flex-shrink-0">
+          {visibleActions.map(a => (
+            <button
+              key={a.label}
+              onClick={() => { a.onBefore?.(); onNavigate(a.page); }}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-md)] border bg-gradient-to-br ${a.accent} text-xs font-semibold hover:scale-[1.04] transition-transform`}
+            >
+              {a.icon} {a.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Weather widgets + detektor */}
       {(weatherLoading || weatherWidgets.length > 0 || onParking !== null || botAlerts.length > 0) && (
@@ -267,6 +429,33 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
               </div>
             </div>
           )}
+
+          {/* Iter 7 fix: Status systemu — wypełnia pas po prawej */}
+          <div className="flex items-center gap-4 bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-2.5 min-w-[260px] flex-1">
+            <Activity size={22} className="text-[var(--color-accent)] flex-shrink-0" />
+            <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px]">
+              <div className="flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${cameras.filter(c => c.url).length === 4 ? 'bg-emerald-400' : cameras.filter(c => c.url).length > 0 ? 'bg-amber-400' : 'bg-red-400'}`} />
+                <span className="text-slate-400">Kamery:</span>
+                <span className="font-bold text-white">{cameras.filter(c => c.url).length}/4</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${detectorOk ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                <span className="text-slate-400">Detektor:</span>
+                <span className="font-bold text-white">{detectorOk ? 'online' : 'offline'}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${botAlerts.length === 0 ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                <span className="text-slate-400">Bot:</span>
+                <span className="font-bold text-white">{botAlerts.length === 0 ? 'OK' : `${botAlerts.length} ⚠`}</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${(bansActive ?? 0) === 0 ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                <span className="text-slate-400">Bany:</span>
+                <span className="font-bold text-white">{bansActive ?? '…'}</span>
+              </div>
+            </div>
+          </div>
           {botAlerts.map(alert => {
             const labelMap: Record<string, string> = {
               groq_tpd_limit: 'TPD — dzienny limit tokenów',
@@ -370,6 +559,44 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
               </div>
             )}
           </div>
+
+          {/* Iter 7 fix: Ostatnie pytania do Orła (zamiast ogólnych zdarzeń) */}
+          {perm.has('chat.use') && orzelLogs.length > 0 && (
+            <div className="mt-3 pt-3 border-t border-[var(--color-border)] flex-shrink-0">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles size={12} className="text-violet-400" />
+                  <span className="text-[10px] uppercase tracking-wider font-semibold text-[var(--color-text-muted)]">Ostatnie pytania do Orła</span>
+                </div>
+                <button
+                  onClick={() => { sessionStorage.setItem('chat_initial_tab', 'asystent'); onNavigate('chat'); }}
+                  className="text-[10px] text-violet-400 hover:underline"
+                >Otwórz →</button>
+              </div>
+              <div className="space-y-1">
+                {orzelLogs.slice(0, 5).map(l => {
+                  const meta = l.metadata as Record<string, unknown> | null;
+                  const q = (meta?.question as string) ?? l.description?.replace(/^Q:\s*/, '') ?? l.action;
+                  return (
+                    <button
+                      key={l.id}
+                      onClick={() => { sessionStorage.setItem('chat_initial_tab', 'asystent'); onNavigate('chat'); }}
+                      className="w-full text-left px-2 py-1 rounded hover:bg-[var(--color-surface-2)] transition-colors"
+                      title={q}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-violet-400" />
+                        <span className="text-[10px] text-[var(--color-text-muted)] flex-shrink-0">
+                          {new Date(l.created_at).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        <span className="text-[11px] truncate text-[var(--color-text)]">{q}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

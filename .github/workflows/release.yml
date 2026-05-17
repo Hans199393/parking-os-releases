@@ -1,0 +1,119 @@
+name: Release Parking.OS
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Wersja (np. v2026.1.0)'
+        required: true
+        default: 'v2026.1.0'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: parking_os/package-lock.json
+
+      - name: Setup Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './parking_os/src-tauri -> target'
+
+      - name: Install frontend dependencies
+        working-directory: parking_os
+        run: npm ci
+
+      - name: Build Tauri (NSIS + MSI)
+        working-directory: parking_os
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: npm run tauri build
+
+      - name: Collect artifacts
+        id: artifacts
+        shell: pwsh
+        run: |
+          $nsis = Get-ChildItem "parking_os\src-tauri\target\release\bundle\nsis\*-setup.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          $msi  = Get-ChildItem "parking_os\src-tauri\target\release\bundle\msi\*.msi"         -ErrorAction SilentlyContinue | Select-Object -First 1
+          $nsig = Get-ChildItem "parking_os\src-tauri\target\release\bundle\nsis\*.sig"        -ErrorAction SilentlyContinue | Select-Object -First 1
+          $msig = Get-ChildItem "parking_os\src-tauri\target\release\bundle\msi\*.sig"         -ErrorAction SilentlyContinue | Select-Object -First 1
+          echo "NSIS: $($nsis?.FullName)"
+          echo "MSI:  $($msi?.FullName)"
+          echo "nsis_path=$($nsis?.FullName)" >> $env:GITHUB_OUTPUT
+          echo "msi_path=$($msi?.FullName)"   >> $env:GITHUB_OUTPUT
+          echo "nsig_path=$($nsig?.FullName)" >> $env:GITHUB_OUTPUT
+          echo "msig_path=$($msig?.FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Generate latest.json for updater
+        id: latest_json
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if (-not $tag) { $tag = "${{ inputs.tag }}" }
+          $version = $tag -replace '^v', ''
+          $nsisName = Split-Path "${{ steps.artifacts.outputs.nsis_path }}" -Leaf
+          $msiName  = Split-Path "${{ steps.artifacts.outputs.msi_path }}" -Leaf
+          $nsigContent = Get-Content "${{ steps.artifacts.outputs.nsig_path }}" -Raw
+          $msigContent = Get-Content "${{ steps.artifacts.outputs.msig_path }}" -Raw
+          $repo = "${{ github.repository }}"
+          $now  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+          $json = @{
+            version  = $version
+            notes    = "Parking.OS $version"
+            pub_date = $now
+            platforms = @{
+              "windows-x86_64" = @{
+                signature = $nsigContent.Trim()
+                url       = "https://github.com/$repo/releases/download/$tag/$nsisName"
+              }
+            }
+          } | ConvertTo-Json -Depth 5
+
+          $json | Out-File -FilePath "latest.json" -Encoding utf8NoBOM
+          Write-Host "Generated latest.json:"
+          Get-Content "latest.json"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name || inputs.tag }}
+          name: Parking.OS ${{ github.ref_name || inputs.tag }}
+          body: |
+            ## Parking.OS ${{ github.ref_name || inputs.tag }}
+
+            ### Instalacja
+            1. Pobierz plik `-setup.exe`
+            2. Uruchom jako administrator lub użytkownik (instalacja dla bieżącego użytkownika)
+            3. Pierwsze uruchomienie — zaloguj się danymi Supabase
+
+            ### Aktualizacja
+            - Aplikacja sprawdza aktualizacje automatycznie przy starcie
+            - Można też użyć Ustawienia → System → Sprawdź aktualizacje
+          draft: false
+          prerelease: false
+          files: |
+            ${{ steps.artifacts.outputs.nsis_path }}
+            ${{ steps.artifacts.outputs.msi_path }}
+            ${{ steps.artifacts.outputs.nsig_path }}
+            ${{ steps.artifacts.outputs.msig_path }}
+            latest.json
+          generate_release_notes: false

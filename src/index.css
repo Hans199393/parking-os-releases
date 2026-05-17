@@ -224,3 +224,50 @@ body {
 .animate-slideUp { animation: slideUp .35s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .animate-slideRight { animation: slideRight .3s cubic-bezier(0.16, 1, 0.3, 1) both; }
 .animate-float-slow { animation: float-slow 4s ease-in-out infinite; }
+
+/* ─── Print styles (Iter 9) ───────────────────────────────────────────────
+   Optymalizacja raportów (DailyReport, MonthlyReport, faktury) na A4.
+   Ukrywamy chrom aplikacji, wymuszamy biały tło, włączamy kolor druku. */
+@media print {
+  html, body, #root {
+    overflow: visible !important;
+    height: auto !important;
+    background: #ffffff !important;
+    background-image: none !important;
+    color: #000 !important;
+  }
+  body { color-adjust: exact; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* Ukryj nawigację, sidebar, modale, toasty, mobile-bar */
+  aside,
+  nav.lg\:sticky,
+  .glass-sidebar,
+  .md\:hidden,
+  [data-no-print],
+  .fixed,
+  button { display: none !important; }
+  /* Zachowaj treść wewnątrz raportu */
+  .print-keep,
+  .print-keep * { display: revert !important; }
+  /* Ujawnij ramki papieru */
+  main {
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+  }
+  /* Reset glassu */
+  .glass, .glass-strong, .glass-sidebar {
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    border: 1px solid #ddd !important;
+    box-shadow: none !important;
+  }
+  /* Strona A4 z marginesem standardowym */
+  @page { size: A4; margin: 16mm 14mm; }
+  /* Nie tnij wierszy raportów */
+  tr, .avoid-break { break-inside: avoid; page-break-inside: avoid; }
+  h1, h2, h3 { break-after: avoid; }
+}

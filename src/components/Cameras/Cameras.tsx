@@ -17,8 +17,8 @@ function PTZBtn({ onClick, children, className = '' }: {
     <button
       onClick={onClick}
       className={`w-9 h-9 flex items-center justify-center rounded-xl transition-all select-none touch-none
-        bg-slate-800/90 hover:bg-slate-700 active:bg-[var(--color-accent)] active:scale-95
-        text-slate-300 hover:text-white border border-slate-600/40 ${className}`}
+        bg-[var(--color-surface-2)]/90 hover:bg-[var(--color-surface-3)] active:bg-[var(--color-accent)] active:scale-95
+        text-[var(--color-text)] hover:text-white border border-[var(--color-border)] ${className}`}
       draggable={false}
     >
       {children}
@@ -51,10 +51,10 @@ function PTZControls({ camId }: { camId: string }) {
   const home = useCallback(() => send('home'), [send]);
 
   return (
-    <div className="bg-slate-950/95 backdrop-blur-md rounded-2xl border border-slate-700/60 p-3 shadow-2xl select-none">
+    <div className="glass-strong rounded-[var(--radius-lg)] border border-[var(--color-border)] p-3 shadow-glow select-none">
       {/* Title */}
       <div className="flex items-center justify-between mb-2.5">
-        <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">PTZ</span>
+        <span className="text-[10px] font-semibold text-[var(--color-text-muted)] uppercase tracking-widest">PTZ</span>
         {ptzError && <span className="text-[10px] text-red-400">Błąd!</span>}
       </div>
 
@@ -64,7 +64,7 @@ function PTZControls({ camId }: { camId: string }) {
         <PTZBtn onClick={() => send('move', 0, 0.7, 0)}><ChevronUp size={15} /></PTZBtn>
         <span />
         <PTZBtn onClick={() => send('move', -0.7, 0, 0)}><ChevronLeft size={15} /></PTZBtn>
-        <PTZBtn onClick={home} className="bg-teal-900/80 hover:bg-teal-700 border-teal-600/50 text-teal-300">
+        <PTZBtn onClick={home} className="bg-[var(--color-accent)]/20 hover:bg-[var(--color-accent)]/40 border-[var(--color-accent)]/50 text-[var(--color-accent)]">
           <Home size={13} />
         </PTZBtn>
         <PTZBtn onClick={() => send('move', 0.7, 0, 0)}><ChevronRight size={15} /></PTZBtn>
@@ -74,7 +74,7 @@ function PTZControls({ camId }: { camId: string }) {
       </div>
 
       {/* Zoom */}
-      <div className="flex gap-1 border-t border-slate-700/50 pt-2">
+      <div className="flex gap-1 border-t border-[var(--color-border)] pt-2">
         <PTZBtn onClick={() => send('move', 0, 0, -0.5)} className="flex-1 gap-1">
           <ZoomOut size={13} /><span className="text-[10px] font-medium">OUT</span>
         </PTZBtn>
@@ -163,38 +163,41 @@ function CameraFeed({ name, camId, ptzEnabled = false, snapshotUrl, rtspUrl, hls
   const connected = mode === 'snapshot' ? (!!imgData && !error) : !!hlsUrl;
 
   return (
-    <div className={`flex flex-col bg-black rounded-xl overflow-hidden border border-slate-700 group absolute inset-0`}>
+    <div className={`flex flex-col bg-black rounded-[var(--radius-lg)] overflow-hidden border border-[var(--color-border)] group absolute inset-0 ring-1 ring-white/5 hover:ring-[var(--color-accent)]/30 transition-all`}>
       {/* Video area — flex-1 fills remaining height */}
       <div className="relative flex-1 min-h-0">
-        {/* Label + status */}
-        <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5">
-          <span className={`inline-block w-2 h-2 rounded-full ${connected ? 'bg-green-400 animate-pulse' : loading ? 'bg-yellow-400 animate-pulse' : 'bg-red-500'}`} />
-          <span className="text-xs text-white bg-black/60 px-2 py-0.5 rounded font-medium">{name}</span>
+        {/* Label + status — nowy badge glass-strong */}
+        <div className="absolute top-2 left-2 z-10 flex items-center gap-1.5 glass-strong rounded-full pl-1.5 pr-2.5 py-0.5 border border-white/10">
+          <span className={`inline-block w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : loading ? 'bg-amber-400 animate-pulse' : 'bg-red-500'}`} />
+          <span className="text-[11px] text-white font-semibold tracking-wide">{name}</span>
+          {connected && (
+            <span className="text-[9px] uppercase tracking-wider px-1 py-px rounded ml-0.5 bg-emerald-500/20 text-emerald-300">{mode === 'hls' ? 'live' : 'snap'}</span>
+          )}
         </div>
 
         {/* Controls */}
         <div className={`absolute top-2 right-2 z-10 flex gap-1 transition-opacity ${ptzOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'}`}>
           {snapshotUrl && hlsUrl && (
             <button onClick={() => setMode(m => m === 'snapshot' ? 'hls' : 'snapshot')}
-              className="bg-black/60 text-white p-1.5 rounded hover:bg-black/80"
+              className="glass-strong text-white p-1.5 rounded-md hover:bg-white/10 border border-white/10"
               title={mode === 'snapshot' ? 'Przełącz na HLS Live' : 'Przełącz na Snapshot'}>
               {mode === 'snapshot' ? <Play size={14} /> : <Image size={14} />}
             </button>
           )}
           {mode === 'snapshot' && snapshotUrl && (
-            <button onClick={refresh} className="bg-black/60 text-white p-1.5 rounded hover:bg-black/80" title="Odśwież">
+            <button onClick={refresh} className="glass-strong text-white p-1.5 rounded-md hover:bg-white/10 border border-white/10" title="Odśwież">
               <RefreshCw size={14} />
             </button>
           )}
           {ptzEnabled && (
             <button onClick={() => setPtzOpen(p => !p)}
-              className={`p-1.5 rounded hover:bg-black/80 transition-colors ${ptzOpen ? 'bg-[var(--color-accent)] text-white' : 'bg-black/60 text-white'}`}
+              className={`p-1.5 rounded-md border transition-colors ${ptzOpen ? 'bg-[var(--color-accent)] text-white border-[var(--color-accent)]' : 'glass-strong text-white border-white/10 hover:bg-white/10'}`}
               title="Sterowanie PTZ">
               <Move size={14} />
             </button>
           )}
           <button onClick={fullscreen ? onExitFullscreen : onFullscreen}
-            className="bg-black/60 text-white p-1.5 rounded hover:bg-black/80"
+            className="glass-strong text-white p-1.5 rounded-md hover:bg-white/10 border border-white/10"
             title={fullscreen ? 'Zmniejsz' : 'Pełny ekran'}>
             {fullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
@@ -257,15 +260,15 @@ function CameraFeed({ name, camId, ptzEnabled = false, snapshotUrl, rtspUrl, hls
 
         {/* No source configured */}
         {!hasAnySource && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center bg-gradient-to-br from-[var(--color-surface)]/40 to-black/60">
             <div className="text-3xl">📷</div>
-            <p className="text-slate-400 text-sm font-medium">{name}</p>
+            <p className="text-[var(--color-text-muted)] text-sm font-medium">{name}</p>
             {rtspUrl ? (
               <div className="max-w-xs">
                 <p className="text-amber-400 text-xs font-semibold mb-1">Skonfiguruj kamere w Ustawieniach</p>
-                <p className="text-slate-500 text-xs mb-2">Wpisz Snapshot HTTP URL lub HLS URL.</p>
-                <div className="bg-slate-800 rounded px-2 py-1 flex items-center gap-1 justify-between">
-                  <span className="text-slate-400 text-xs truncate max-w-[160px]">{rtspUrl}</span>
+                <p className="text-[var(--color-text-muted)] text-xs mb-2">Wpisz Snapshot HTTP URL lub HLS URL.</p>
+                <div className="glass-strong rounded-md px-2 py-1 flex items-center gap-1 justify-between border border-white/10">
+                  <span className="text-slate-300 text-xs truncate max-w-[160px]">{rtspUrl}</span>
                   <button onClick={copyRtsp} className="text-[var(--color-accent)] hover:opacity-80 flex-shrink-0" title="Kopiuj RTSP">
                     <Copy size={12} />
                   </button>
@@ -280,17 +283,17 @@ function CameraFeed({ name, camId, ptzEnabled = false, snapshotUrl, rtspUrl, hls
 
         {/* Snapshot loading */}
         {mode === 'snapshot' && snapshotUrl && loading && !imgData && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/40">
             <div className="w-8 h-8 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin" />
-            <p className="text-slate-400 text-xs">Łączenie z kamerą...</p>
+            <p className="text-[var(--color-text-muted)] text-xs">Łączenie z kamerą...</p>
           </div>
         )}
 
         {/* Snapshot error */}
         {mode === 'snapshot' && snapshotUrl && error && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center bg-gradient-to-br from-red-950/30 to-black/60">
             <div className="text-3xl">⚠️</div>
-            <p className="text-slate-400 text-sm">Brak odpowiedzi kamery</p>
+            <p className="text-[var(--color-text-muted)] text-sm">Brak odpowiedzi kamery</p>
             <p className="text-slate-600 text-xs break-all max-w-xs">{error}</p>
             <button onClick={refresh} className="mt-1 text-xs text-[var(--color-accent)] hover:underline">Spróbuj ponownie</button>
             {hlsUrl && (
@@ -387,24 +390,27 @@ export default function Cameras({ cam1SnapshotUrl, cam1RtspUrl, cam1HlsUrl, cam2
       {/* Nagłówek */}
       <div className="flex items-center justify-between flex-shrink-0">
         <div>
-          <h1 className="text-xl font-bold text-[var(--color-text)]">Kamery</h1>
-          <p className="text-[var(--color-text-muted)] text-xs mt-0.5">
-            {anyConfigured ? 'Snapshot (~1,5 kl/s) lub HLS live' : 'Skonfiguruj adresy kamer w Ustawieniach'}
+          <h1 className="text-2xl font-bold text-[var(--color-text)] tracking-tight">Kamery</h1>
+          <p className="text-[var(--color-text-muted)] text-xs mt-0.5 flex items-center gap-2">
+            <span className={`inline-block w-1.5 h-1.5 rounded-full ${anyConfigured ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+            {anyConfigured
+              ? `${cameras.filter(c => c.snapshotUrl || c.hlsUrl).length}/${cameras.length} kamer aktywnych · snapshot ~1,5 kl/s lub HLS live`
+              : 'Skonfiguruj adresy kamer w Ustawieniach'}
           </p>
         </div>
         {/* Przełączniki layoutu */}
         {fullscreenCam === null && (
-          <div className="flex items-center gap-1 bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-1">
+          <div className="flex items-center gap-1 glass-strong border border-[var(--color-border)] rounded-[var(--radius-md)] p-1">
             <button onClick={() => setLayoutSave('grid2x2')} title="Siatka 2×2"
-              className={`p-1.5 rounded transition-colors ${layout === 'grid2x2' ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]' : 'text-slate-400 hover:text-slate-200'}`}>
+              className={`p-1.5 rounded transition-colors ${layout === 'grid2x2' ? 'bg-[var(--color-accent)]/20 text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/40' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}>
               <LayoutGrid size={15} />
             </button>
             <button onClick={() => setLayoutSave('big1')} title="1 duży + 3 małe"
-              className={`p-1.5 rounded transition-colors ${layout === 'big1' ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]' : 'text-slate-400 hover:text-slate-200'}`}>
+              className={`p-1.5 rounded transition-colors ${layout === 'big1' ? 'bg-[var(--color-accent)]/20 text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/40' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}>
               <LayoutPanelLeft size={15} />
             </button>
             <button onClick={() => setLayoutSave('list')} title="Lista pozioma"
-              className={`p-1.5 rounded transition-colors ${layout === 'list' ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)]' : 'text-slate-400 hover:text-slate-200'}`}>
+              className={`p-1.5 rounded transition-colors ${layout === 'list' ? 'bg-[var(--color-accent)]/20 text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/40' : 'text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}>
               <List size={15} />
             </button>
           </div>
@@ -413,12 +419,12 @@ export default function Cameras({ cam1SnapshotUrl, cam1RtspUrl, cam1HlsUrl, cam2
 
       {/* Instrukcja gdy brak kamer */}
       {!anyConfigured && (
-        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-4 flex-shrink-0">
-          <h3 className="text-amber-400 font-semibold text-xs mb-2">Jak uruchomić podgląd kamer?</h3>
-          <div className="text-slate-400 text-xs space-y-1">
-            <p><strong className="text-slate-300">Opcja 1 — Snapshot HTTP:</strong> Wpisz URL w Ustawieniach (np. <code className="text-slate-300">http://admin:haslo@IP/snapshot.cgi</code>)</p>
-            <p><strong className="text-slate-300">Opcja 2 — HLS:</strong> Uruchom proxy ffmpeg w <code className="text-slate-300">rtsp-proxy/</code>, wpisz <code className="text-slate-300">http://localhost:8888/stream/cam1.m3u8</code></p>
-            <p><strong className="text-slate-300">Opcja 3 — VLC:</strong> Skopiuj RTSP URL z Ustawień i otwórz w VLC</p>
+        <div className="glass-strong border border-amber-500/30 rounded-[var(--radius-lg)] p-4 flex-shrink-0 ring-1 ring-amber-500/10">
+          <h3 className="text-amber-300 font-semibold text-xs mb-2 uppercase tracking-wider">Jak uruchomić podgląd kamer?</h3>
+          <div className="text-[var(--color-text-muted)] text-xs space-y-1">
+            <p><strong className="text-[var(--color-text)]">Opcja 1 — Snapshot HTTP:</strong> Wpisz URL w Ustawieniach (np. <code className="text-[var(--color-text)] bg-black/30 px-1 rounded">http://admin:haslo@IP/snapshot.cgi</code>)</p>
+            <p><strong className="text-[var(--color-text)]">Opcja 2 — HLS:</strong> Uruchom proxy ffmpeg w <code className="text-[var(--color-text)] bg-black/30 px-1 rounded">rtsp-proxy/</code>, wpisz <code className="text-[var(--color-text)] bg-black/30 px-1 rounded">http://localhost:8888/stream/cam1.m3u8</code></p>
+            <p><strong className="text-[var(--color-text)]">Opcja 3 — VLC:</strong> Skopiuj RTSP URL z Ustawień i otwórz w VLC</p>
           </div>
         </div>
       )}
@@ -432,8 +438,8 @@ export default function Cameras({ cam1SnapshotUrl, cam1RtspUrl, cam1HlsUrl, cam2
           <div className="flex gap-2 flex-shrink-0">
             {cameras.map((cam, i) => (
               <button key={i} onClick={() => setFullscreenCam(i)}
-                className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors border
-                  ${fullscreenCam === i ? 'bg-[var(--color-accent-bg)] border-[var(--color-accent-border)] text-[var(--color-accent)]' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}>
+                className={`flex-1 py-1.5 rounded-[var(--radius-md)] text-xs font-semibold transition-all border
+                  ${fullscreenCam === i ? 'bg-[var(--color-accent)]/15 border-[var(--color-accent)]/50 text-[var(--color-accent)] ring-1 ring-[var(--color-accent)]/30' : 'glass-strong border-[var(--color-border)] text-[var(--color-text-muted)] hover:text-[var(--color-text)]'}`}>
                 {cam.name}
               </button>
             ))}

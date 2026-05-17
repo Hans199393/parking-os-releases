@@ -1,5 +1,6 @@
 import { getSupabaseClient } from './supabase';
-import { setCurrentUser, getCurrentUser, SUPERADMIN_EMAIL, ALL_PAGES } from './session';
+import { setCurrentUser, getCurrentUser, normalizePermissions, SUPERADMIN_EMAIL } from './session';
+import { expandAllPerms } from './permissions';
 import { logAction } from './audit';
 
 export async function signIn(
@@ -16,13 +17,25 @@ export async function signIn(
 
     const user = data.user!;
     const isSA = user.email?.toLowerCase() === SUPERADMIN_EMAIL;
-    const meta = (user.user_metadata ?? {}) as { permissions?: string[] };
+    const meta = (user.user_metadata ?? {}) as {
+      permissions?: string[];
+      first_name?: string;
+      last_name?: string;
+      avatar_color?: string;
+      must_change_password?: boolean;
+    };
 
     setCurrentUser({
       id: user.id,
       email: user.email!,
       role: isSA ? 'superadmin' : 'operator',
-      permissions: isSA ? [...ALL_PAGES] : (meta.permissions ?? ['dashboard', 'cameras']),
+      permissions: isSA
+        ? expandAllPerms()
+        : normalizePermissions(meta.permissions ?? ['dashboard.view', 'cameras.view']),
+      firstName: meta.first_name,
+      lastName: meta.last_name,
+      avatarColor: meta.avatar_color,
+      mustChangePassword: !!meta.must_change_password,
     });
 
     await logAction('login', { email: user.email });

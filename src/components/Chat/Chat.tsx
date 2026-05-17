@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { MessageCircle, Send, User, Bot, RefreshCw, X, Trash2, CheckCircle, RotateCcw, UserCheck, BotOff, MessageSquare } from 'lucide-react';
+import { MessageCircle, Send, User, Bot, RefreshCw, X, Trash2, CheckCircle, RotateCcw, UserCheck, BotOff, MessageSquare, Sparkles } from 'lucide-react';
 import { getSupabaseClient, isConfigured } from '../../lib/supabase';
 import { Spinner } from '../shared/UI';
+import OrzelAssistantPanel from './OrzelAssistantPanel';
 
 interface MessengerConversation {
   messenger_id: string;
@@ -38,7 +39,16 @@ const PAGE_SIZE = 20;
 
 export default function Chat() {
   // Top-level source toggle
-  const [chatSource, setChatSource] = useState<'widget' | 'messenger'>('widget');
+  const [chatSource, setChatSource] = useState<'widget' | 'messenger' | 'asystent'>(() => {
+    try {
+      const flag = sessionStorage.getItem('chat_initial_tab');
+      if (flag === 'asystent' || flag === 'messenger' || flag === 'widget') {
+        sessionStorage.removeItem('chat_initial_tab');
+        return flag;
+      }
+    } catch { /* noop */ }
+    return 'widget';
+  });
 
   // Widget state
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -279,27 +289,51 @@ export default function Chat() {
     async function subscribe() {
       if (!(await isConfigured())) return;
       const sb = await getSupabaseClient();
+      try {
+        // If we already have a channel reference, unsubscribe first to avoid
+        // adding callbacks to an already-subscribed channel (supabase-js throws).
+        if (channelRef.current) {
+          try { channelRef.current.unsubscribe(); } catch { /* ignore */ }
+          channelRef.current = null;
+        }
 
-      const channel = sb.channel('chat-realtime')
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, (payload) => {
+        const channel = sb.channel('chat-realtime');
+
+        // Register handlers before subscribing
+        channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_messages' }, (payload) => {
           if (!mounted) return;
           const newMsg = payload.new as ChatMessage;
-          // Add to messages if it's the currently open session
           if (selectedSessionRef.current === newMsg.session_id) {
             setMessages(prev => {
               if (prev.some(m => m.id === newMsg.id)) return prev;
               return [...prev, newMsg];
             });
           }
-          // Always refresh sessions list for last_activity update
           loadSessions();
-        })
-        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_sessions' }, () => {
-          if (mounted) loadSessions();
-        })
-        .subscribe();
+        });
 
-      channelRef.current = channel;
+        channel.on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'chat_sessions' }, () => {
+          if (mounted) loadSessions();
+        });
+
+        // Subscribe (subscribe may be sync or async depending on sdk version)
+        try {
+          // If subscribe returns a promise, await it; otherwise ignore
+          const maybePromise = channel.subscribe();
+          if (maybePromise && typeof (maybePromise as any).then === 'function') {
+            await maybePromise;
+          }
+        } catch (err) {
+          // Do not throw — log and continue. Prevent uncaught promise errors.
+          // eslint-disable-next-line no-console
+          console.error('[chat] realtime subscribe failed:', err);
+        }
+
+        channelRef.current = channel;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[chat] subscribe() error:', err);
+      }
     }
 
     subscribe();
@@ -418,9 +452,21 @@ export default function Chat() {
         >
           <MessageSquare size={15} /> Messenger
         </button>
+        <button
+          onClick={() => setChatSource('asystent')}
+          className={`flex items-center gap-2 px-5 py-3 text-sm font-semibold transition border-b-2 ${
+            chatSource === 'asystent'
+              ? 'border-[var(--color-accent)] text-[var(--color-accent)]'
+              : 'border-transparent text-[var(--color-muted)] hover:text-[var(--color-text)]'
+          }`}
+        >
+          <Sparkles size={15} /> Asystent Orzeł
+        </button>
       </div>
 
-      {chatSource === 'messenger' ? (
+      {chatSource === 'asystent' ? (
+        <OrzelAssistantPanel />
+      ) : chatSource === 'messenger' ? (
         /* ===== MESSENGER VIEW ===== */
         <div className="flex flex-1 min-h-0">
           {/* Conversations list */}

@@ -123,14 +123,15 @@ interface ModalProps {
   onClose: () => void;
   title: string;
   children: React.ReactNode;
+  maxWidth?: string;
 }
 
-export function Modal({ open, onClose, title, children }: ModalProps) {
+export function Modal({ open, onClose, title, children, maxWidth = 'max-w-md' }: ModalProps) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center animate-[fadeIn_.15s_ease]">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative bg-[var(--color-surface)] backdrop-blur-md border border-[var(--color-border)] rounded-[var(--radius-xl)] shadow-[var(--shadow-xl)] w-full max-w-md p-6 z-10 animate-[slideUp_.2s_cubic-bezier(0.16,1,0.3,1)]">
+      <div className={`relative bg-[var(--color-surface)] backdrop-blur-md border border-[var(--color-border)] rounded-[var(--radius-xl)] shadow-[var(--shadow-xl)] w-full ${maxWidth} p-6 z-10 animate-[slideUp_.2s_cubic-bezier(0.16,1,0.3,1)] max-h-[90vh] overflow-y-auto`}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-bold text-[var(--color-text)]">{title}</h2>
           <button onClick={onClose} className="text-[var(--color-muted)] hover:text-[var(--color-text)] hover:bg-[var(--color-surface-2)] rounded-md p-1.5 transition-colors"><X size={18} /></button>

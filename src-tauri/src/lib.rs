@@ -1,10 +1,11 @@
 use bcrypt::{hash, verify, DEFAULT_COST};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use base64::Engine;
 use std::sync::{Arc, Mutex};
 use std::process::Child;
 use serde::Serialize;
 use mailparse::MailHeaderMap;
+use serde::Deserialize;
 
 // ─── Email types ─────────────────────────────────────────────────────────────
 #[derive(Serialize, Clone)]
@@ -152,9 +153,20 @@ async fn email_send(imap_host: String, imap_port: u16, smtp_host: String, smtp_p
         use lettre::transport::smtp::authentication::Credentials;
         use lettre::message::header::ContentType;
         use lettre::message::{Mailbox, MultiPart, SinglePart, Attachment};
+        use std::time::{SystemTime, UNIX_EPOCH};
 
         let from: Mailbox = user.parse().map_err(|_| "Nieprawidłowy adres nadawcy".to_string())?;
         let to_mb: Mailbox = to.parse().map_err(|_| "Nieprawidłowy adres odbiorcy".to_string())?;
+        let reply_mb: Mailbox = user.parse().map_err(|_| "Nieprawidłowy adres Reply-To".to_string())?;
+
+        // Domena nadawcy do Message-ID (DMARC alignment)
+        let sender_domain = user.split('@').nth(1).unwrap_or("localhost").to_string();
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
+        let pid = std::process::id();
+        let message_id_value = format!("{}.{}@{}", nanos, pid, sender_domain);
+
+        // Plain-text fallback z HTML (proste strip tagów + decode entities)
+        let plain_text = html_to_plain(&body);
 
         // HTML body referencing inline logo via CID
         let html_part = SinglePart::builder()
@@ -166,15 +178,27 @@ async fn email_send(imap_host: String, imap_port: u16, smtp_host: String, smtp_p
         let logo_part = Attachment::new_inline(String::from("logo@parking"))
             .body(logo_bytes, ContentType::parse("image/png").unwrap());
 
+        // Plain-text part (text/plain; charset=utf-8)
+        let plain_part = SinglePart::builder()
+            .header(ContentType::TEXT_PLAIN)
+            .body(plain_text);
+
+        // Hierarchia: multipart/alternative { text/plain, multipart/related { html, logo } }
+        let html_with_logo = MultiPart::related()
+            .singlepart(html_part)
+            .singlepart(logo_part);
+
+        let alternative = MultiPart::alternative()
+            .singlepart(plain_part)
+            .multipart(html_with_logo);
+
         let email = Message::builder()
             .from(from)
+            .reply_to(reply_mb)
             .to(to_mb)
             .subject(subject)
-            .multipart(
-                MultiPart::related()
-                    .singlepart(html_part)
-                    .singlepart(logo_part),
-            )
+            .message_id(Some(message_id_value))
+            .multipart(alternative)
             .map_err(|e| e.to_string())?;
 
         // Build raw bytes for IMAP APPEND (Sent folder)
@@ -216,6 +240,115 @@ async fn email_send(imap_host: String, imap_port: u16, smtp_host: String, smtp_p
         session.logout().ok();
         Ok(())
     }).await.map_err(|e| e.to_string())?
+}
+
+/// Iter 13: Konwertuje HTML na prosty text/plain jako alternatywa dla klientów
+/// które nie wyświetlają HTML (oraz dla filtrów spamu Gmaila — wymagają text alt).
+/// UWAGA: pracuje na &str / char (nie na bajtach) — UTF-8 safe dla polskich znaków.
+fn html_to_plain(html: &str) -> String {
+    // 1. Usuń <style>...</style> i <script>...</script> wraz z zawartością
+    //    (case-insensitive — szukamy w lowercase kopii, ale wycinamy z oryginału po byte-index'ach
+    //    które są tożsame, bo lowercasowanie ASCII tagów nie zmienia długości w bajtach).
+    let lower = html.to_ascii_lowercase();
+    let mut cleaned = String::with_capacity(html.len());
+    let mut cursor_b: usize = 0; // byte index w oryginale (== w lower bo ASCII-lowercase)
+    while cursor_b < html.len() {
+        // znajdź najbliższy <style albo <script
+        let next_style = lower[cursor_b..].find("<style").map(|i| (i + cursor_b, "</style>"));
+        let next_script = lower[cursor_b..].find("<script").map(|i| (i + cursor_b, "</script>"));
+        let (open_at, close_tag) = match (next_style, next_script) {
+            (Some(a), Some(b)) => if a.0 < b.0 { a } else { b },
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => {
+                // Brak więcej style/script — dopisz resztę i zakończ
+                cleaned.push_str(&html[cursor_b..]);
+                break;
+            }
+        };
+        // dopisz wszystko PRZED otwierającym tagiem
+        cleaned.push_str(&html[cursor_b..open_at]);
+        // znajdź koniec close_tag (>... </style> lub </script>)
+        let after_open = match lower[open_at..].find('>') {
+            Some(off) => open_at + off + 1,
+            None => { // niedomknięty tag — wytnij wszystko do końca
+                break;
+            }
+        };
+        let close_at = match lower[after_open..].find(close_tag) {
+            Some(off) => after_open + off + close_tag.len(),
+            None => { // niedomknięty — wytnij do końca
+                break;
+            }
+        };
+        cursor_b = close_at;
+    }
+
+    // 2. Zamień <br>, </p>, </div>, </tr>, <li> na newline — case-insensitive
+    let mut t = cleaned;
+    let replacements: &[(&str, &str)] = &[
+        ("<br>", "\n"), ("<br/>", "\n"), ("<br />", "\n"),
+        ("</p>", "\n\n"), ("</div>", "\n"), ("</tr>", "\n"),
+        ("</h1>", "\n\n"), ("</h2>", "\n\n"), ("</h3>", "\n\n"),
+        ("<li>", "\n• "), ("</li>", ""),
+    ];
+    for (pat, repl) in replacements {
+        // Case-insensitive replace pracując na lowercase mapie
+        loop {
+            let lt = t.to_ascii_lowercase();
+            match lt.find(pat) {
+                Some(idx) => {
+                    let end = idx + pat.len();
+                    let mut new_s = String::with_capacity(t.len());
+                    new_s.push_str(&t[..idx]);
+                    new_s.push_str(repl);
+                    new_s.push_str(&t[end..]);
+                    t = new_s;
+                }
+                None => break,
+            }
+        }
+    }
+
+    // 3. Usuń wszystkie pozostałe tagi (operacja na CHARS, nie bajtach — UTF-8 safe)
+    let mut out = String::with_capacity(t.len());
+    let mut in_tag = false;
+    for ch in t.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            c if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+
+    // 4. Dekoduj najpopularniejsze entity
+    let out = out
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'");
+
+    // 5. Skompresuj wielokrotne puste linie
+    let lines: Vec<&str> = out.lines().map(|l| l.trim_end()).collect();
+    let mut compressed = String::with_capacity(out.len());
+    let mut prev_blank = false;
+    for line in lines {
+        let blank = line.trim().is_empty();
+        if blank && prev_blank { continue; }
+        compressed.push_str(line);
+        compressed.push('\n');
+        prev_blank = blank;
+    }
+    let trimmed = compressed.trim().to_string();
+    if trimmed.is_empty() {
+        "(treść w wersji HTML)".to_string()
+    } else {
+        trimmed
+    }
 }
 
 #[tauri::command]
@@ -462,6 +595,193 @@ async fn fetch_snapshot(url: String) -> Result<String, String> {
     Ok(format!("data:{};base64,{}", mime, b64))
 }
 
+// ─── Splashscreen ────────────────────────────────────────────────────────────
+/// Zamyka okno splashscreen i pokazuje główne okno aplikacji.
+/// Wywoływane z React po zakończeniu inicjalizacji.
+#[tauri::command]
+async fn close_splashscreen(app: AppHandle) -> Result<(), String> {
+    if let Some(splash) = app.get_webview_window("splashscreen") {
+        splash.close().map_err(|e| e.to_string())?;
+    }
+    if let Some(main_win) = app.get_webview_window("main") {
+        main_win.show().map_err(|e| e.to_string())?;
+        main_win.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+// ─── Sync — odczyt/zapis bazy SQLite ─────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct DbSyncMeta {
+    pub size_bytes: u64,
+    pub last_modified: String,
+    pub path: String,
+}
+
+/// Zwraca bajty pliku SQLite jako base64 — do uploadowania przez JS do Supabase Storage.
+#[tauri::command]
+async fn db_read_for_sync(app: AppHandle) -> Result<String, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let db_path = data_dir.join("parking_os.db");
+    if !db_path.exists() {
+        return Err("Plik bazy danych nie istnieje. Czy aplikacja była wcześniej uruchomiona?".into());
+    }
+    let bytes = std::fs::read(&db_path).map_err(|e| format!("Błąd odczytu bazy: {}", e))?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Ok(b64)
+}
+
+/// Zapisuje bajty bazy (base64) do tymczasowego pliku — do porównania przed sync.
+#[tauri::command]
+async fn db_save_temp_for_sync(app: AppHandle, data: String) -> Result<DbSyncMeta, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let temp_path = data_dir.join("parking_os_sync_temp.db");
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&data)
+        .map_err(|e| format!("Błąd dekodowania danych: {}", e))?;
+    std::fs::write(&temp_path, &bytes)
+        .map_err(|e| format!("Błąd zapisu pliku tymczasowego: {}", e))?;
+    let meta = std::fs::metadata(&temp_path).map_err(|e| e.to_string())?;
+    let modified = meta.modified()
+        .map(|t| {
+            let secs = t
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            format!("{}", secs)
+        })
+        .unwrap_or_else(|_| "0".into());
+    Ok(DbSyncMeta {
+        size_bytes: meta.len(),
+        last_modified: modified,
+        path: temp_path.to_string_lossy().to_string(),
+    })
+}
+
+/// Zastępuje aktualną bazę wybraną (tymczasową lub aktualną) — po decyzji użytkownika.
+/// action: "replace" = zastąp lokalną bazę pobraną; "keep" = zostaw lokalną bez zmian.
+#[tauri::command]
+async fn db_apply_sync(app: AppHandle, action: String) -> Result<(), String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let db_path = data_dir.join("parking_os.db");
+    let temp_path = data_dir.join("parking_os_sync_temp.db");
+
+    if action == "replace" {
+        if !temp_path.exists() {
+            return Err("Brak tymczasowej bazy do zastosowania.".into());
+        }
+        // Kopia bezpieczeństwa przed nadpisaniem
+        let backup_path = data_dir.join(format!(
+            "parking_os_before_sync_{}.db.bak",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        ));
+        if db_path.exists() {
+            std::fs::copy(&db_path, &backup_path)
+                .map_err(|e| format!("Błąd tworzenia kopii bezpieczeństwa: {}", e))?;
+        }
+        std::fs::rename(&temp_path, &db_path)
+            .map_err(|e| format!("Błąd zastępowania bazy: {}", e))?;
+    } else {
+        // "keep" — usuń tylko temp
+        if temp_path.exists() {
+            std::fs::remove_file(&temp_path).ok();
+        }
+    }
+    Ok(())
+}
+
+/// Usuwa tymczasowy plik sync (po zakończeniu procesu).
+#[tauri::command]
+async fn db_delete_temp(app: AppHandle) -> Result<(), String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let temp_path = data_dir.join("parking_os_sync_temp.db");
+    if temp_path.exists() {
+        std::fs::remove_file(&temp_path).map_err(|e| format!("Błąd usuwania pliku: {}", e))?;
+    }
+    Ok(())
+}
+
+/// Zwraca metadane aktualnej bazy (rozmiar, data modyfikacji).
+#[tauri::command]
+async fn db_get_meta(app: AppHandle) -> Result<DbSyncMeta, String> {
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    let db_path = data_dir.join("parking_os.db");
+    if !db_path.exists() {
+        return Ok(DbSyncMeta {
+            size_bytes: 0,
+            last_modified: "0".into(),
+            path: db_path.to_string_lossy().to_string(),
+        });
+    }
+    let meta = std::fs::metadata(&db_path).map_err(|e| e.to_string())?;
+    let modified = meta.modified()
+        .map(|t| {
+            let secs = t
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            format!("{}", secs)
+        })
+        .unwrap_or_else(|_| "0".into());
+    Ok(DbSyncMeta {
+        size_bytes: meta.len(),
+        last_modified: modified,
+        path: db_path.to_string_lossy().to_string(),
+    })
+}
+
+// ─── Autostart ────────────────────────────────────────────────────────────────
+#[derive(Serialize, Deserialize)]
+pub struct AutostartStatus {
+    pub enabled: bool,
+}
+
+#[tauri::command]
+async fn autostart_get_status(
+    #[allow(unused)] autostart: tauri::State<'_, tauri_plugin_autostart::AutoLaunchManager>,
+) -> Result<AutostartStatus, String> {
+    let enabled = autostart.is_enabled().map_err(|e| e.to_string())?;
+    Ok(AutostartStatus { enabled })
+}
+
+#[tauri::command]
+async fn autostart_set(
+    enable: bool,
+    #[allow(unused)] autostart: tauri::State<'_, tauri_plugin_autostart::AutoLaunchManager>,
+) -> Result<(), String> {
+    if enable {
+        autostart.enable().map_err(|e| e.to_string())?;
+    } else {
+        autostart.disable().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+// ─── App restart (po sync) ────────────────────────────────────────────────────
+#[tauri::command]
+async fn app_restart(app: AppHandle) {
+    app.restart();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -472,6 +792,8 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             hash_password,
             verify_password,
@@ -490,6 +812,15 @@ pub fn run() {
             email_fetch_sent_body,
             email_send,
             email_delete,
+            close_splashscreen,
+            db_read_for_sync,
+            db_save_temp_for_sync,
+            db_apply_sync,
+            db_delete_temp,
+            db_get_meta,
+            autostart_get_status,
+            autostart_set,
+            app_restart,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

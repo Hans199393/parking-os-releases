@@ -19,6 +19,8 @@ tauri-plugin-notification = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-fs = "2"
 tauri-plugin-store = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bcrypt = "0.16"
@@ -29,4 +31,5 @@ imap = "2.4"
 native-tls = "0.2"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "native-tls", "builder"] }
 mailparse = "0.15"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 

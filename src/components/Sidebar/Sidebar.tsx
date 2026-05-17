@@ -1,7 +1,8 @@
-﻿import { LayoutDashboard, Camera, CalendarDays, DollarSign, Settings, Smartphone, MessageCircle, Mail, LogOut, ClipboardList } from 'lucide-react';
+﻿import { LayoutDashboard, Camera, CalendarDays, DollarSign, Settings, Smartphone, MessageCircle, Mail, LogOut, ClipboardList, RefreshCw } from 'lucide-react';
 import type { AppUser } from '../../lib/session';
+import { checkPermission } from '../../lib/permissions';
 
-export type Page = 'dashboard' | 'cameras' | 'reservations' | 'finances' | 'admin' | 'chat' | 'email' | 'settings' | 'logs';
+export type Page = 'dashboard' | 'cameras' | 'reservations' | 'finances' | 'admin' | 'chat' | 'email' | 'settings' | 'logs' | 'sync';
 
 const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
@@ -10,6 +11,7 @@ const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: 'finances', label: 'Finanse', icon: <DollarSign size={20} /> },
   { id: 'chat', label: 'Czat Orzeł', icon: <MessageCircle size={20} /> },
   { id: 'email', label: 'Skrzynka', icon: <Mail size={20} /> },
+  { id: 'sync', label: 'Synchronizacja', icon: <RefreshCw size={20} /> },
   { id: 'logs', label: 'Logi', icon: <ClipboardList size={20} /> },
   { id: 'settings', label: 'Ustawienia', icon: <Settings size={20} /> },
 ];
@@ -28,7 +30,7 @@ interface SidebarProps {
 
 export default function Sidebar({ current, onChange, reservationBadge, chatBadge, onOpenPwa, onStopPwa, pwaStatus, user, onLogout }: SidebarProps) {
   const visibleItems = navItems.filter(item =>
-    !user || user.role === 'superadmin' || user.permissions.includes(item.id)
+    !user || user.role === 'superadmin' || checkPermission(user.permissions, item.id)
   );
 
   return (
@@ -37,7 +39,7 @@ export default function Sidebar({ current, onChange, reservationBadge, chatBadge
       <div className="relative flex items-center justify-center px-5 py-6 border-b border-[var(--color-border)]/30">
         <div className="absolute inset-0 opacity-50 pointer-events-none"
              style={{ background: 'var(--gradient-amber-glow)' }} />
-        <img src="/logo2026.png" alt="Parking.OS" className="h-12 w-auto object-contain drop-shadow-[0_4px_16px_rgba(245,158,11,0.4)] animate-float-slow relative z-10" />
+        <img src="/logo2026.png" alt="Parking.OS" className="h-24 w-auto object-contain drop-shadow-[0_4px_20px_rgba(245,158,11,0.5)] animate-float-slow relative z-10" />
       </div>
 
       {/* Nav items */}

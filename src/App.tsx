@@ -11,14 +11,25 @@ import Settings from './components/Settings/Settings';
 import Chat from './components/Chat/Chat';
 import Email from './components/Email/Email';
 import Logs from './components/Logs/Logs';
+import SyncManager from './components/Sync/SyncManager';
+import ShortcutsHelp from './components/shared/ShortcutsHelp';
+import CommandPalette from './components/CommandPalette/CommandPalette';
+import FloatingChatPanel from './components/Chat/FloatingChatPanel';
+import ChatFAB from './components/Chat/ChatFAB';
+import { useKeyboardShortcuts } from './lib/useKeyboardShortcuts';
 import { startPolling, stopPolling, startChatPolling, stopChatPolling } from './lib/notifications';
 import { scheduleDailyBackup } from './lib/backup';
 import { logPageView, logLogout } from './lib/logger';
 import { getStore } from './lib/store';
 import { applyAccentColor, ACCENT_COLORS } from './components/Settings/Settings';
-import { signOut } from './lib/auth';
-import { getCurrentUser, setCurrentUser as setSessionUser, SUPERADMIN_EMAIL, ALL_PAGES, type AppUser } from './lib/session';
+import { signOut, verifyCurrentPassword, changePassword } from './lib/auth';
+import { getCurrentUser, setCurrentUser as setSessionUser, SUPERADMIN_EMAIL, normalizePermissions, type AppUser } from './lib/session';
+import { expandAllPerms } from './lib/permissions';
+import { useIdleLock } from './lib/idleLock';
 import { getSupabaseClient } from './lib/supabase';
+import { audit } from './lib/audit';
+import { Lock, KeyRound, Check } from 'lucide-react';
+import { Button, Input } from './components/shared/UI';
 import './index.css';
 
 type Theme = 'light' | 'dark' | 'system';
@@ -91,6 +102,11 @@ export default function App() {
         const found = ACCENT_COLORS.find(c => c.id === ac);
         if (found) applyAccentColor(found.hex);
       }
+    }).finally(() => {
+      // Zamknij splash screen i pokaż główne okno po zakończeniu inicjalizacji
+      invoke('close_splashscreen').catch(() => {
+        // W trybie dev splashscreen nie istnieje — ignoruj błąd
+      });
     });
     loadCameraUrls();
   }, [loadCameraUrls]);
@@ -102,12 +118,19 @@ export default function App() {
     getSupabaseClient().then(sb => sb.auth.getUser()).then(({ data }) => {
       if (!data.user) return;
       const isSA = data.user.email?.toLowerCase() === SUPERADMIN_EMAIL;
-      const meta = (data.user.user_metadata ?? {}) as { permissions?: string[] };
+      const meta = (data.user.user_metadata ?? {}) as {
+        permissions?: string[]; first_name?: string; last_name?: string;
+        avatar_color?: string; must_change_password?: boolean;
+      };
       const restored: AppUser = {
         id: data.user.id,
         email: data.user.email!,
         role: isSA ? 'superadmin' : 'operator',
-        permissions: isSA ? [...ALL_PAGES] : (meta.permissions ?? ['dashboard', 'cameras']),
+        permissions: isSA ? expandAllPerms() : normalizePermissions(meta.permissions ?? ['dashboard.view', 'cameras.view']),
+        firstName: meta.first_name,
+        lastName: meta.last_name,
+        avatarColor: meta.avatar_color,
+        mustChangePassword: !!meta.must_change_password,
       };
       setSessionUser(restored);
       setCurrentUser(restored);
@@ -188,35 +211,141 @@ export default function App() {
     setPwaStatus('stopped');
   }, []);
 
-  const handleNavigate = (p: Page) => {
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const handleNavigate = useCallback((p: Page) => {
     sessionStorage.setItem('parking_os_page', p);
     setPage(p);
     logPageView(p);
     if (p === 'reservations') setReservationBadge(0);
     if (p === 'chat') setChatBadge(0);
-  };
+    setMobileNavOpen(false);
+  }, []);
+
+  // Globalne skróty klawiaturowe (Iter 9)
+  useKeyboardShortcuts(handleNavigate);
+
+  // Iter 13: Ctrl+O — Command Palette ("O" jak Orzeł)
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  // Iter 13: Ctrl+J — Pływający panel chat (à la Copilot)
+  const [chatPanelOpen, setChatPanelOpen] = useState(false);
+  useEffect(() => {
+    if (!authenticated) return;
+    const onKey = (e: KeyboardEvent) => {
+      const isCtrl = e.ctrlKey || e.metaKey;
+      if (!isCtrl) return;
+      // Używamy e.code (niezależne od layoutu klawiatury) + fallback na e.key
+      const code = e.code; // 'KeyJ' / 'KeyO'
+      const key = (e.key || '').toLowerCase();
+
+      // Ctrl+O — paleta poleceń
+      if (code === 'KeyO' || key === 'o') {
+        e.preventDefault();
+        e.stopPropagation();
+        setPaletteOpen(s => !s);
+        return;
+      }
+      // Ctrl+J — pływający chat Orzeł
+      if (code === 'KeyJ' || key === 'j') {
+        e.preventDefault();
+        e.stopPropagation();
+        setChatPanelOpen(s => !s);
+        return;
+      }
+    };
+    // capture: true — łapiemy event PRZED handlerami komponentów i akceleratorami WebView
+    window.addEventListener('keydown', onKey, { capture: true });
+    const onToggle = () => setChatPanelOpen(s => !s);
+    window.addEventListener('app:toggle-chat-panel', onToggle as EventListener);
+    return () => {
+      window.removeEventListener('keydown', onKey, { capture: true } as any);
+      window.removeEventListener('app:toggle-chat-panel', onToggle as EventListener);
+    };
+  }, [authenticated]);
 
   useEffect(() => {
     return () => { stopPolling(); stopChatPolling(); };
   }, []);;
 
+  // ─── Idle lock + force-change-password ────────────────────────────────────
+  const [locked, setLocked] = useState(false);
+  const [idleTimeoutMin, setIdleTimeoutMin] = useState(5);
+
+  useEffect(() => {
+    void getStore().then(async store => {
+      const v = await store.get<string | number>('session_idle_timeout_min');
+      if (v != null) {
+        const n = typeof v === 'number' ? v : parseInt(String(v), 10);
+        if (!isNaN(n) && n >= 0 && n <= 120) setIdleTimeoutMin(n);
+      }
+    });
+  }, []);
+
+  useIdleLock({
+    enabled: authenticated && !locked && idleTimeoutMin > 0,
+    timeoutMs: idleTimeoutMin * 60_000,
+    onLock: () => {
+      setLocked(true);
+      void audit('session', 'session_locked_idle', {
+        description: `Sesja zablokowana po ${idleTimeoutMin} min nieaktywności`,
+      });
+    },
+  });
+
   if (!authenticated) {
     return <Login onSuccess={handleAuth} />;
   }
 
+  if (currentUser?.mustChangePassword) {
+    return <ForceChangePasswordScreen user={currentUser} onDone={() => {
+      setCurrentUser(getCurrentUser());
+    }} onLogout={handleLogout} />;
+  }
+
   return (
     <div className="flex h-screen overflow-hidden p-3 gap-3">
-      <Sidebar
-        current={page}
-        onChange={handleNavigate}
-        reservationBadge={reservationBadge}
-        chatBadge={chatBadge}
-        onOpenPwa={handleOpenPwa}
-        onStopPwa={handleStopPwa}
-        pwaStatus={pwaStatus}
-        user={currentUser}
-        onLogout={handleLogout}
-      />
+      {/* Mobile top bar — widoczny tylko < 768px */}
+      <div className="md:hidden fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-3 py-2 glass-strong border-b border-[var(--color-border)]/40">
+        <button onClick={() => setMobileNavOpen(o => !o)}
+          aria-label="Menu" className="p-2 rounded hover:bg-[var(--color-surface-2)]">
+          <span className="block w-5 h-[2px] bg-[var(--color-text)] mb-1" />
+          <span className="block w-5 h-[2px] bg-[var(--color-text)] mb-1" />
+          <span className="block w-5 h-[2px] bg-[var(--color-text)]" />
+        </button>
+        <span className="text-sm font-bold flex-1 truncate">Parking.OS · {page}</span>
+      </div>
+      {/* Mobile drawer overlay */}
+      {mobileNavOpen && (
+        <div className="md:hidden fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={() => setMobileNavOpen(false)}>
+          <div className="absolute top-0 left-0 bottom-0 w-72 max-w-[85vw] p-3" onClick={e => e.stopPropagation()}>
+            <Sidebar
+              current={page}
+              onChange={handleNavigate}
+              reservationBadge={reservationBadge}
+              chatBadge={chatBadge}
+              onOpenPwa={handleOpenPwa}
+              onStopPwa={handleStopPwa}
+              pwaStatus={pwaStatus}
+              user={currentUser}
+              onLogout={handleLogout}
+            />
+          </div>
+        </div>
+      )}
+      {/* Desktop sidebar — ukryty < 768px */}
+      <div className="hidden md:block">
+        <Sidebar
+          current={page}
+          onChange={handleNavigate}
+          reservationBadge={reservationBadge}
+          chatBadge={chatBadge}
+          onOpenPwa={handleOpenPwa}
+          onStopPwa={handleStopPwa}
+          pwaStatus={pwaStatus}
+          user={currentUser}
+          onLogout={handleLogout}
+        />
+      </div>
       <main className="flex-1 overflow-hidden relative glass-strong rounded-[var(--radius-xl)] animate-fadeIn">
         {page === 'dashboard' && (
           <Dashboard
@@ -262,10 +391,148 @@ export default function App() {
         {page === 'logs' && (
           <Logs />
         )}
+        {page === 'sync' && (
+          <div className="absolute inset-0 overflow-y-auto custom-scroll">
+            <SyncManager />
+          </div>
+        )}
         {page === 'settings' && (
-          <Settings theme={theme} onThemeChange={handleThemeChange} onSettingsSaved={loadCameraUrls} user={currentUser} />
+          <div className="absolute inset-0 overflow-y-auto p-6 custom-scroll">
+            <Settings theme={theme} onThemeChange={handleThemeChange} onSettingsSaved={loadCameraUrls} user={currentUser} />
+          </div>
         )}
       </main>
+
+      {locked && currentUser && (
+        <LockScreen user={currentUser} onUnlock={() => setLocked(false)} onLogout={handleLogout} />
+      )}
+      <ShortcutsHelp />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onNavigate={handleNavigate}
+      />
+      {/* Iter 13: Pływający chat à la Copilot */}
+      <FloatingChatPanel
+        open={chatPanelOpen}
+        onClose={() => setChatPanelOpen(false)}
+        onMinimize={() => setChatPanelOpen(false)}
+      />
+      <ChatFAB visible={authenticated && !chatPanelOpen} onClick={() => setChatPanelOpen(true)} />
+    </div>
+  );
+}
+
+// ─── LockScreen — overlay po idle timeout ────────────────────────────────────
+function LockScreen({ user, onUnlock, onLogout }: { user: AppUser; onUnlock: () => void; onLogout: () => void }) {
+  const [pwd, setPwd] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setErr('');
+    try {
+      const ok = await verifyCurrentPassword(pwd);
+      if (!ok) { setErr('Nieprawidłowe hasło'); setBusy(false); return; }
+      void audit('session', 'session_unlocked', { description: 'Sesja odblokowana hasłem' });
+      onUnlock();
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : String(e2));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const initials = (user.firstName?.[0] ?? user.email[0] ?? '?').toUpperCase()
+    + (user.lastName?.[0] ?? '');
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-md flex items-center justify-center animate-fadeIn p-4">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-6">
+          <div className="w-20 h-20 mx-auto rounded-full bg-gradient-accent flex items-center justify-center text-2xl font-bold text-[#1a1410] shadow-[var(--shadow-xl)] ring-glow mb-3">
+            {initials}
+          </div>
+          <h2 className="text-xl font-bold text-white">{user.firstName ?? user.email}</h2>
+          <p className="text-sm text-slate-400 mt-1 flex items-center justify-center gap-1.5">
+            <Lock size={12} /> Sesja zablokowana — wpisz hasło
+          </p>
+        </div>
+        <form onSubmit={submit} className="glass-strong rounded-[var(--radius-xl)] p-6 shadow-[var(--shadow-xl)] space-y-3">
+          <Input label="Hasło" type="password" value={pwd} onChange={e => setPwd(e.target.value)} autoFocus required />
+          {err && <p className="text-xs text-red-400 font-bold">{err}</p>}
+          <Button type="submit" variant="primary" size="lg" loading={busy} className="w-full">
+            <Check size={16} /> Odblokuj
+          </Button>
+          <button type="button" onClick={onLogout}
+            className="w-full text-xs text-slate-400 hover:text-white py-2 transition-colors">
+            Wyloguj na inne konto
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── ForceChangePasswordScreen — pierwsze logowanie po invite ────────────────
+function ForceChangePasswordScreen({ user, onDone, onLogout }: {
+  user: AppUser; onDone: () => void; onLogout: () => void;
+}) {
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErr('');
+    if (next.length < 8) { setErr('Hasło min. 8 znaków'); return; }
+    if (next !== confirm) { setErr('Hasła nie są identyczne'); return; }
+    setBusy(true);
+    try {
+      await changePassword(next);
+      const sb = await getSupabaseClient();
+      await sb.auth.updateUser({ data: { ...user, must_change_password: false } });
+      const u = getCurrentUser();
+      if (u) setSessionUser({ ...u, mustChangePassword: false });
+      void audit('user', 'first_login_password_set', {
+        entityType: 'user', entityId: user.id, severity: 'warning',
+        description: 'Ustawiono nowe hasło przy pierwszym logowaniu',
+      });
+      onDone();
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : String(e2));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-slate-950 flex items-center justify-center p-4">
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-6">
+          <div className="w-16 h-16 mx-auto rounded-[var(--radius-lg)] bg-amber-500/20 flex items-center justify-center mb-3">
+            <KeyRound size={32} className="text-amber-400" />
+          </div>
+          <h1 className="text-xl font-bold text-white">Zmień hasło tymczasowe</h1>
+          <p className="text-sm text-slate-400 mt-1">Witaj {user.firstName ?? user.email}! Ustaw własne hasło, aby kontynuować.</p>
+        </div>
+        <form onSubmit={submit} className="glass-strong rounded-[var(--radius-xl)] p-6 shadow-[var(--shadow-xl)] space-y-3">
+          <Input label="Nowe hasło (min. 8 znaków)" type="password" value={next}
+            onChange={e => setNext(e.target.value)} autoFocus required minLength={8} autoComplete="new-password" />
+          <Input label="Powtórz hasło" type="password" value={confirm}
+            onChange={e => setConfirm(e.target.value)} required minLength={8} autoComplete="new-password" />
+          {err && <p className="text-xs text-red-400 font-bold">{err}</p>}
+          <Button type="submit" variant="primary" size="lg" loading={busy} className="w-full">
+            <Check size={16} /> Ustaw hasło
+          </Button>
+          <button type="button" onClick={onLogout}
+            className="w-full text-xs text-slate-400 hover:text-white py-2 transition-colors">
+            Wyloguj się
+          </button>
+        </form>
+      </div>
     </div>
   );
 }
