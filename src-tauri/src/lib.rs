@@ -6,6 +6,102 @@ use std::process::Child;
 use serde::Serialize;
 use mailparse::MailHeaderMap;
 use serde::Deserialize;
+use serde_json::Value;
+use std::path::{Path, PathBuf};
+
+const DEV_FFMPEG_PATH: &str = r"G:\parking_2026\ffmpeg-8.1-essentials_build\bin\ffmpeg.exe";
+
+struct ProxyRuntimePaths {
+    proxy_dir: PathBuf,
+    server_js: PathBuf,
+    server_js_exists: bool,
+    bundled_node_exists: bool,
+    bundled_ffmpeg_exists: bool,
+    node_cmd: String,
+    ffmpeg_path: String,
+}
+
+fn command_available(command: &str) -> bool {
+    std::process::Command::new(command)
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+fn resolve_proxy_runtime_paths(app: &AppHandle) -> ProxyRuntimePaths {
+    let resource_dir = app.path().resource_dir().unwrap_or_default();
+    let repo_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    let bundled_proxy_dir = resource_dir.join("rtsp-proxy");
+    let repo_proxy_dir = repo_dir.join("../rtsp-proxy");
+    let bundled_server_js = bundled_proxy_dir.join("server.js");
+    let repo_server_js = repo_proxy_dir.join("server.js");
+
+    let (proxy_dir, server_js) = if bundled_server_js.exists() {
+        (bundled_proxy_dir, bundled_server_js)
+    } else {
+        (repo_proxy_dir, repo_server_js)
+    };
+
+    let bundled_node = resource_dir.join("bin").join("node.exe");
+    let repo_node = repo_dir.join("bin").join("node.exe");
+    let node_cmd = if bundled_node.exists() {
+        bundled_node.to_string_lossy().to_string()
+    } else if repo_node.exists() {
+        repo_node.to_string_lossy().to_string()
+    } else {
+        "node".to_string()
+    };
+
+    let bundled_ffmpeg = resource_dir.join("bin").join("ffmpeg.exe");
+    let repo_ffmpeg = repo_dir.join("bin").join("ffmpeg.exe");
+    let ffmpeg_path = if bundled_ffmpeg.exists() {
+        bundled_ffmpeg.to_string_lossy().to_string()
+    } else if repo_ffmpeg.exists() {
+        repo_ffmpeg.to_string_lossy().to_string()
+    } else if Path::new(DEV_FFMPEG_PATH).exists() {
+        DEV_FFMPEG_PATH.to_string()
+    } else {
+        "ffmpeg".to_string()
+    };
+
+    ProxyRuntimePaths {
+        proxy_dir,
+        server_js_exists: server_js.exists(),
+        server_js,
+        bundled_node_exists: bundled_node.exists() || repo_node.exists() || command_available("node"),
+        bundled_ffmpeg_exists: bundled_ffmpeg.exists()
+            || repo_ffmpeg.exists()
+            || Path::new(DEV_FFMPEG_PATH).exists()
+            || command_available("ffmpeg"),
+        node_cmd,
+        ffmpeg_path,
+    }
+}
+
+fn read_settings_json(app: &AppHandle) -> Value {
+    app.path()
+        .app_data_dir()
+        .ok()
+        .and_then(|dir| std::fs::read_to_string(dir.join("settings.json")).ok())
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .unwrap_or_else(|| Value::Object(Default::default()))
+}
+
+fn read_setting_string(settings: &Value, key: &str) -> String {
+    settings
+        .get(key)
+        .and_then(|value| match value {
+            Value::String(value) => Some(value.clone()),
+            Value::Number(value) => Some(value.to_string()),
+            Value::Bool(value) => Some(value.to_string()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
 
 // ─── Email types ─────────────────────────────────────────────────────────────
 #[derive(Serialize, Clone)]
@@ -614,10 +710,7 @@ async fn camera_runtime_status(
     app: AppHandle,
     state: tauri::State<'_, ProxyProcess>,
 ) -> Result<CameraRuntimeStatus, String> {
-    let resource_dir = app.path().resource_dir().unwrap_or_default();
-    let server_js = resource_dir.join("rtsp-proxy").join("server.js");
-    let bundled_node = resource_dir.join("bin").join("node.exe");
-    let bundled_ffmpeg = resource_dir.join("bin").join("ffmpeg.exe");
+    let runtime = resolve_proxy_runtime_paths(&app);
 
     let proxy_process_running = {
         let mut guard = state.0.lock().map_err(|e| e.to_string())?;
@@ -639,18 +732,18 @@ async fn camera_runtime_status(
         Err(_) => false,
     };
 
-    let server_js_exists = server_js.exists();
-    let bundled_node_exists = bundled_node.exists();
-    let bundled_ffmpeg_exists = bundled_ffmpeg.exists();
+    let server_js_exists = runtime.server_js_exists;
+    let bundled_node_exists = runtime.bundled_node_exists;
+    let bundled_ffmpeg_exists = runtime.bundled_ffmpeg_exists;
 
-    let issue = if !server_js_exists || !bundled_node_exists || !bundled_ffmpeg_exists {
+    let issue = if proxy_health_ok {
+        None
+    } else if !server_js_exists || !bundled_node_exists || !bundled_ffmpeg_exists {
         Some("Brakuje lokalnego runtime kamer. Ten komputer potrzebuje pełnego update z pakietem Node.js, ffmpeg i RTSP proxy.".to_string())
     } else if !proxy_process_running {
         Some("Lokalny proxy kamer nie wystartował po uruchomieniu aplikacji.".to_string())
-    } else if !proxy_health_ok {
-        Some("Lokalny proxy kamer działa nieprawidłowo albo nie odpowiada na http://localhost:8888/.".to_string())
     } else {
-        None
+        Some("Lokalny proxy kamer działa nieprawidłowo albo nie odpowiada na http://localhost:8888/.".to_string())
     };
 
     Ok(CameraRuntimeStatus {
@@ -867,6 +960,7 @@ pub fn run() {
         .manage(DetectorProcess(Arc::new(Mutex::new(None))))
         .manage(ProxyProcess(Arc::new(Mutex::new(None))))
         .setup(|app| {
+            let app_handle = app.handle().clone();
             // ── Preload default settings on first install ──────────────────
             let resource_dir = app.path().resource_dir().unwrap_or_default();
             if let Ok(app_data_dir) = app.path().app_data_dir() {
@@ -880,33 +974,31 @@ pub fn run() {
                 }
             }
             // ── Auto-start RTSP→HLS proxy ──────────────────────────────────
-            let resource_dir = app.path().resource_dir().unwrap_or_default();
-            let server_js = resource_dir.join("rtsp-proxy").join("server.js");
-            if server_js.exists() {
-                let proxy_dir = resource_dir.join("rtsp-proxy");
-                // Bundled node.exe (prod) or system node (dev)
-                let bundled_node = resource_dir.join("bin").join("node.exe");
-                let node_cmd = if bundled_node.exists() {
-                    bundled_node.to_string_lossy().to_string()
-                } else {
-                    "node".to_string()
-                };
-                // Bundled ffmpeg (prod) > dev path > system ffmpeg
-                let bundled_ffmpeg = resource_dir.join("bin").join("ffmpeg.exe");
-                let dev_ffmpeg = r"G:\parking_2026\ffmpeg-8.1-essentials_build\bin\ffmpeg.exe";
-                let ffmpeg_path = if bundled_ffmpeg.exists() {
-                    bundled_ffmpeg.to_string_lossy().to_string()
-                } else if std::path::Path::new(dev_ffmpeg).exists() {
-                    dev_ffmpeg.to_string()
-                } else {
-                    "ffmpeg".to_string()
-                };
-                let mut cmd = std::process::Command::new(&node_cmd);
-                cmd.arg(&server_js)
-                    .current_dir(&proxy_dir)
-                    .env("FFMPEG_PATH", &ffmpeg_path)
+            let runtime = resolve_proxy_runtime_paths(&app_handle);
+            if runtime.server_js_exists {
+                let settings = read_settings_json(&app_handle);
+                let cam1_rtsp = read_setting_string(&settings, "cam1_rtsp_url");
+                let cam2_rtsp = read_setting_string(&settings, "cam2_rtsp_url");
+                let cam3_rtsp = read_setting_string(&settings, "cam3_rtsp_url");
+                let cam4_rtsp = read_setting_string(&settings, "cam4_rtsp_url");
+                let mut cmd = std::process::Command::new(&runtime.node_cmd);
+                cmd.arg(&runtime.server_js)
+                    .current_dir(&runtime.proxy_dir)
+                    .env("FFMPEG_PATH", &runtime.ffmpeg_path)
                     .stdout(std::process::Stdio::null())
                     .stderr(std::process::Stdio::null());
+                if !cam1_rtsp.trim().is_empty() {
+                    cmd.env("CAM1_RTSP", cam1_rtsp);
+                }
+                if !cam2_rtsp.trim().is_empty() {
+                    cmd.env("CAM2_RTSP", cam2_rtsp);
+                }
+                if !cam3_rtsp.trim().is_empty() {
+                    cmd.env("CAM3_RTSP", cam3_rtsp);
+                }
+                if !cam4_rtsp.trim().is_empty() {
+                    cmd.env("CAM4_RTSP", cam4_rtsp);
+                }
                 match cmd.spawn() {
                     Ok(child) => {
                         if let Some(state) = app.try_state::<ProxyProcess>() {

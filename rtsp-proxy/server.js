@@ -11,7 +11,10 @@ if (require('fs').existsSync(envPath)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) return;
     const [key, ...rest] = trimmed.split('=');
-    if (key && rest.length) process.env[key.trim()] = rest.join('=').trim();
+    const normalizedKey = key?.trim();
+    if (normalizedKey && rest.length && process.env[normalizedKey] == null) {
+      process.env[normalizedKey] = rest.join('=').trim();
+    }
   });
 }
 
