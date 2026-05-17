@@ -14,6 +14,26 @@ use std::io::Write;
 const DEV_FFMPEG_PATH: &str = r"G:\parking_2026\ffmpeg-8.1-essentials_build\bin\ffmpeg.exe";
 const CAMERA_PROXY_LOG_FILE: &str = "camera-proxy.log";
 
+#[cfg(windows)]
+fn normalize_runtime_path(path: &Path) -> PathBuf {
+    let raw = path.to_string_lossy();
+
+    if let Some(stripped) = raw.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{}", stripped));
+    }
+
+    if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+        return PathBuf::from(stripped);
+    }
+
+    path.to_path_buf()
+}
+
+#[cfg(not(windows))]
+fn normalize_runtime_path(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
 struct ProxyRuntimePaths {
     proxy_dir: PathBuf,
     server_js: PathBuf,
@@ -35,8 +55,8 @@ fn command_available(command: &str) -> bool {
 }
 
 fn resolve_proxy_runtime_paths(app: &AppHandle) -> ProxyRuntimePaths {
-    let resource_dir = app.path().resource_dir().unwrap_or_default();
-    let repo_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let resource_dir = normalize_runtime_path(&app.path().resource_dir().unwrap_or_default());
+    let repo_dir = normalize_runtime_path(&PathBuf::from(env!("CARGO_MANIFEST_DIR")));
 
     let bundled_proxy_dir = resource_dir.join("rtsp-proxy");
     let repo_proxy_dir = repo_dir.join("../rtsp-proxy");
