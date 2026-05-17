@@ -26,7 +26,7 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-          cache-dependency-path: parking_os/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Setup Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -34,14 +34,12 @@ jobs:
       - name: Cache Rust build
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: './parking_os/src-tauri -> target'
+          workspaces: './src-tauri -> target'
 
       - name: Install frontend dependencies
-        working-directory: parking_os
         run: npm ci
 
       - name: Build Tauri (NSIS + MSI)
-        working-directory: parking_os
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
@@ -51,12 +49,12 @@ jobs:
         id: artifacts
         shell: pwsh
         run: |
-          $nsis = Get-ChildItem "parking_os\src-tauri\target\release\bundle\nsis\*-setup.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          $nzip = Get-ChildItem "parking_os\src-tauri\target\release\bundle\nsis\*-setup.nsis.zip" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          $msi  = Get-ChildItem "parking_os\src-tauri\target\release\bundle\msi\*.msi" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          $nsig = Get-ChildItem "parking_os\src-tauri\target\release\bundle\nsis\*-setup.exe.sig" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          $zsig = Get-ChildItem "parking_os\src-tauri\target\release\bundle\nsis\*-setup.nsis.zip.sig" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          $msig = Get-ChildItem "parking_os\src-tauri\target\release\bundle\msi\*.msi.sig" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $nsis = Get-ChildItem "src-tauri\target\release\bundle\nsis\*-setup.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $nzip = Get-ChildItem "src-tauri\target\release\bundle\nsis\*-setup.nsis.zip" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $msi  = Get-ChildItem "src-tauri\target\release\bundle\msi\*.msi" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $nsig = Get-ChildItem "src-tauri\target\release\bundle\nsis\*-setup.exe.sig" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $zsig = Get-ChildItem "src-tauri\target\release\bundle\nsis\*-setup.nsis.zip.sig" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $msig = Get-ChildItem "src-tauri\target\release\bundle\msi\*.msi.sig" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           echo "NSIS: $($nsis?.FullName)"
           echo "NSIS ZIP: $($nzip?.FullName)"
           echo "MSI:  $($msi?.FullName)"
