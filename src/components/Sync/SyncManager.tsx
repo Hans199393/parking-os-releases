@@ -11,6 +11,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { getSupabaseClient } from '../../lib/supabase';
+import { getDb } from '../../lib/database';
 import Database from '@tauri-apps/plugin-sql';
 import {
   Upload, Download, RefreshCw, CheckCircle2, AlertTriangle,
@@ -73,7 +74,7 @@ function calcTotal(row: RevenueRow): number {
 }
 
 async function applyMergedSelection(rows: SyncRow[]): Promise<void> {
-  const localDb = await Database.load('sqlite:parking_os.db');
+  const localDb = await getDb();
   try {
     await localDb.execute('BEGIN IMMEDIATE');
 
@@ -133,8 +134,6 @@ async function applyMergedSelection(rows: SyncRow[]): Promise<void> {
   } catch (error) {
     try { await localDb.execute('ROLLBACK'); } catch { /* ignore */ }
     throw error;
-  } finally {
-    await localDb.close().catch(() => false);
   }
 }
 
@@ -222,12 +221,11 @@ export default function SyncManager() {
       setStep('comparing');
 
       // 3. Otwórz obie bazy i porównaj daily_revenue
-      const localDb = await Database.load('sqlite:parking_os.db');
+      const localDb = await getDb();
       const remoteDb = await Database.load('sqlite:parking_os_sync_temp.db');
 
       const localRows: RevenueRow[] = await localDb.select('SELECT * FROM daily_revenue ORDER BY date', []);
       const remoteRows: RevenueRow[] = await remoteDb.select('SELECT * FROM daily_revenue ORDER BY date', []);
-      await localDb.close().catch(() => false);
       await remoteDb.close().catch(() => false);
 
       // Merge wszystkich dat

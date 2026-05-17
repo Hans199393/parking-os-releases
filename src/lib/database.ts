@@ -1,17 +1,40 @@
 import Database from '@tauri-apps/plugin-sql';
 
-let db: Awaited<ReturnType<typeof Database.load>> | null = null;
+type SqlDatabase = Awaited<ReturnType<typeof Database.load>>;
+
+let db: SqlDatabase | null = null;
+
+async function openDb(): Promise<SqlDatabase> {
+  const nextDb = await Database.load('sqlite:parking_os.db');
+  try {
+    db = nextDb;
+    await initSchema(nextDb);
+    return nextDb;
+  } catch (error) {
+    db = null;
+    throw error;
+  }
+}
 
 export async function getDb() {
   if (!db) {
-    db = await Database.load('sqlite:parking_os.db');
-    await initSchema();
+    return openDb();
   }
+
+  try {
+    await db.select('SELECT 1', []);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.toLowerCase().includes('closed pool')) {
+      throw error;
+    }
+    return openDb();
+  }
+
   return db;
 }
 
-async function initSchema() {
-  const database = await getDb();
+async function initSchema(database: SqlDatabase) {
 
   // Migration: if daily_revenue lacks denomination columns, drop and recreate
   let hasDenoms = false;

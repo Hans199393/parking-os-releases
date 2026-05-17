@@ -12,6 +12,7 @@
 - Dodanie paska postępu dla updatera z informacją o pobranych danych, całkowitym rozmiarze paczki, liczbie MB pozostałych do pobrania oraz rozmiarze ostatniego chunku.
 - Stabilizacja ładowania modułu Finanse: ekran ładuje sekcje sekwencyjnie zamiast odpalać kilka równoległych zapytań do lokalnej bazy na starcie.
 - Uściślenie błędów w module Finanse: jeśli któraś część ładowania nadal padnie, komunikat pokazuje teraz konkretny zakres (`Przychody`, `Faktury`, `Inwestycje`, `Suma przychodów`).
+- Naprawa błędu `attempted to acquire a connection on a closed pool`: Sync nie zamyka już współdzielonego lokalnego połączenia SQLite, a warstwa `getDb()` potrafi odtworzyć uchwyt po wykryciu zamkniętego poola.
 
 ## Zmiany techniczne
 
@@ -19,6 +20,8 @@
 - Dotknięte pliki:
 	- `src/components/Settings/SystemTab.tsx`
 	- `src/components/Finances/Finances.tsx`
+	- `src/components/Sync/SyncManager.tsx`
+	- `src/lib/database.ts`
 	- `src-tauri/tauri.conf.json`
 	- `.github/workflows/release.yml`
 	- `README.md`
@@ -43,7 +46,7 @@
 ## Artefakty
 
 - Paczka update: `Parking.OS_2026.1.2_x64-setup.exe`
-- Suma kontrolna SHA-256: `F5209E0EDCFD1881418ECB8FF50FBAF14DFA9FE273DDFE99C3DBDAE9FC6A1BAB`
+- Suma kontrolna SHA-256: `3E53C36D495E4D84FD5ADB817759FED44BEB1082A684973008F638032F1A3204`
 - Link pobrania: `https://github.com/Hans199393/parking-os-releases/releases/download/v2026.1.2/Parking.OS_2026.1.2_x64-setup.exe`
 
 ## Uwagi wdrożeniowe
