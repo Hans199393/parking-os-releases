@@ -116,4 +116,5 @@ jobs:
             ${{ steps.artifacts.outputs.nsig_path }}
             ${{ steps.artifacts.outputs.msig_path }}
             latest.json
+          overwrite_files: true
           generate_release_notes: false

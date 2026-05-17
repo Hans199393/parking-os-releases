@@ -14,6 +14,7 @@
 - Naprawa synchronizacji lokalnej: wybór per dzień w ekranie Sync faktycznie zapisuje teraz wybrane rekordy do lokalnej bazy zamiast kończyć się pozornym sukcesem bez zmian.
 - Naprawa środowiska kamer na gołym systemie: update nie usuwa już bundlowanego runtime kamer, a widok kamer pokazuje diagnostykę brakującego lub martwego lokalnego proxy.
 - Uzupełnienie CSP Tauri dla radia: wyszukiwarka stacji, favicony i zewnętrzne streamy HTTP/HTTPS są dozwolone także w wersji spakowanej.
+- Naprawa sterowania radiem: kliknięcie karty wyników wybiera teraz stację do głównego panelu sterowania, a etykieta panelu nie udaje już aktywnej stacji.
 
 ## Założenia funkcjonalne na start
 
@@ -81,7 +82,7 @@
 ## Artefakty
 
 - Paczka update: `Parking.OS_2026.1.1_x64-setup.exe`
-- Suma kontrolna SHA-256: `238FC05CF3B109ACFF7C8AFBB248E2C5DA66F5F1439858EED39A4D23F64280CA`
+- Suma kontrolna SHA-256: `26DB22F6658DB5F614B429997E18EC9C939CEF9976AE41316C6F2D36A04350C3`
 - Link pobrania: `do uzupełnienia po publikacji`
 
 ## Uwagi wdrożeniowe

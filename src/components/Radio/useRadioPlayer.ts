@@ -76,6 +76,7 @@ export interface RadioPlayerApi {
   autoplay: boolean;
   panelOpen: boolean;
   error: string | null;
+  selectStation: (station: RadioStation) => void;
   playStation: (station: RadioStation) => Promise<void>;
   togglePlayback: () => Promise<void>;
   stop: () => void;
@@ -194,6 +195,11 @@ export function useRadioPlayer(enabled: boolean): RadioPlayerApi {
     audio.muted = muted;
   }, [muted, volume]);
 
+  const selectStation = useCallback((station: RadioStation) => {
+    setCurrentStation(station);
+    setError(null);
+  }, []);
+
   const playStation = useCallback(async (station: RadioStation) => {
     if (!enabled) {
       setError('Brak uprawnień do modułu radia internetowego.');
@@ -205,9 +211,8 @@ export function useRadioPlayer(enabled: boolean): RadioPlayerApi {
 
     const shouldReuseSource = currentStation?.id === station.id && !!audio.currentSrc;
 
-    setCurrentStation(station);
+    selectStation(station);
     setPanelOpenState(true);
-    setError(null);
     setIsBuffering(true);
 
     if (!shouldReuseSource) {
@@ -221,7 +226,7 @@ export function useRadioPlayer(enabled: boolean): RadioPlayerApi {
       setIsBuffering(false);
       setError(friendlyPlaybackError(playbackError));
     }
-  }, [attachSource, currentStation?.id, enabled]);
+  }, [attachSource, currentStation?.id, enabled, selectStation]);
 
   const togglePlayback = useCallback(async () => {
     const audio = audioRef.current;
@@ -405,6 +410,7 @@ export function useRadioPlayer(enabled: boolean): RadioPlayerApi {
     autoplay,
     panelOpen,
     error,
+    selectStation,
     playStation,
     togglePlayback,
     stop,
@@ -427,6 +433,7 @@ export function useRadioPlayer(enabled: boolean): RadioPlayerApi {
     autoplay,
     panelOpen,
     error,
+    selectStation,
     playStation,
     togglePlayback,
     stop,

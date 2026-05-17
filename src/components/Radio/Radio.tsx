@@ -25,7 +25,7 @@ function StationCard({ station, player }: { station: RadioStation; player: Radio
 
   return (
     <Card
-      className={`border transition-all ${active ? 'border-[var(--color-accent-border)] bg-[var(--color-accent-bg)]/20' : ''}`}
+      className={`border transition-all ${active ? 'border-[var(--color-accent-border)] bg-[var(--color-accent-bg)]/20' : 'cursor-pointer hover:border-[var(--color-accent-border)]/60'}`}
       title={station.name}
       subtitle={stationInfo(station)}
       icon={station.favicon ? (
@@ -45,14 +45,27 @@ function StationCard({ station, player }: { station: RadioStation; player: Radio
         </button>
       }
     >
-      <div className="space-y-3">
+      <div
+        className="space-y-3"
+        onClick={() => player.selectStation(station)}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            player.selectStation(station);
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        aria-label={`Wybierz stację ${station.name}`}
+      >
         <p className="text-xs leading-5 text-[var(--color-text-muted)]">{stationMeta(station)}</p>
         <div className="flex flex-wrap gap-2">
           <Button
             size="sm"
             variant={playing ? 'secondary' : 'primary'}
             disabled={!player.canControl}
-            onClick={() => {
+            onClick={e => {
+              e.stopPropagation();
               if (active && player.isPlaying) {
                 void player.togglePlayback();
                 return;
@@ -63,11 +76,24 @@ function StationCard({ station, player }: { station: RadioStation; player: Radio
             {playing ? <Pause size={14} /> : <Play size={14} />}
             {playing ? 'Pauza' : active ? 'Wznów' : 'Graj'}
           </Button>
-          <Button size="sm" variant="ghost" onClick={() => player.setPanelOpen(true)}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={e => {
+              e.stopPropagation();
+              player.selectStation(station);
+              player.setPanelOpen(true);
+            }}
+          >
             {player.panelOpen ? <PinOff size={14} /> : <Pin size={14} />}
-            {player.panelOpen ? 'Panel aktywny' : 'Pokaż panel'}
+            {player.panelOpen ? 'Otwórz panel' : 'Pokaż panel'}
           </Button>
         </div>
+        {!active && (
+          <p className="text-[11px] text-[var(--color-text-muted)]">
+            Kliknij kartę, aby wybrać stację do sterowania z górnego panelu.
+          </p>
+        )}
       </div>
     </Card>
   );
