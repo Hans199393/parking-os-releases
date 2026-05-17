@@ -489,6 +489,20 @@ fn detector_is_running(state: tauri::State<'_, DetectorProcess>) -> bool {
 // ─── PWA server process management ──────────────────────────────────────────
 pub struct PwaServer(pub Arc<Mutex<Option<Child>>>);
 
+// ─── RTSP→HLS proxy process management ───────────────────────────────────────
+pub struct ProxyProcess(pub Arc<Mutex<Option<Child>>>);
+
+impl Drop for ProxyProcess {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.0.lock() {
+            if let Some(mut child) = guard.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+}
+
 #[tauri::command]
 fn spawn_pwa(state: tauri::State<'_, PwaServer>) -> Result<u16, String> {
     let mut guard = state.0.lock().map_err(|e| e.to_string())?;
@@ -787,6 +801,36 @@ pub fn run() {
     tauri::Builder::default()
         .manage(PwaServer(Arc::new(Mutex::new(None))))
         .manage(DetectorProcess(Arc::new(Mutex::new(None))))
+        .manage(ProxyProcess(Arc::new(Mutex::new(None))))
+        .setup(|app| {
+            // ── Auto-start RTSP→HLS proxy ──────────────────────────────────
+            let resource_dir = app.path().resource_dir().unwrap_or_default();
+            let server_js = resource_dir.join("rtsp-proxy").join("server.js");
+            if server_js.exists() {
+                let proxy_dir = resource_dir.join("rtsp-proxy");
+                let dev_ffmpeg = r"G:\parking_2026\ffmpeg-8.1-essentials_build\bin\ffmpeg.exe";
+                let ffmpeg_path = if std::path::Path::new(dev_ffmpeg).exists() {
+                    dev_ffmpeg.to_string()
+                } else {
+                    "ffmpeg".to_string()
+                };
+                let mut cmd = std::process::Command::new("node");
+                cmd.arg(&server_js)
+                    .current_dir(&proxy_dir)
+                    .env("FFMPEG_PATH", &ffmpeg_path)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null());
+                match cmd.spawn() {
+                    Ok(child) => {
+                        if let Some(state) = app.try_state::<ProxyProcess>() {
+                            *state.0.lock().unwrap() = Some(child);
+                        }
+                    }
+                    Err(e) => eprintln!("[proxy] Nie można uruchomić node: {}", e),
+                }
+            }
+            Ok(())
+        })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
