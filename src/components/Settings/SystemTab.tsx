@@ -19,6 +19,12 @@ interface UpdateInfo {
 
 type UpdateState = 'idle' | 'checking' | 'available' | 'none' | 'downloading' | 'done' | 'error';
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
 export default function SystemTab() {
   const [autostartEnabled, setAutostartEnabled] = useState<boolean | null>(null);
   const [autostartBusy, setAutostartBusy] = useState(false);
@@ -27,6 +33,9 @@ export default function SystemTab() {
   const [updateState, setUpdateState] = useState<UpdateState>('idle');
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [downloadedBytes, setDownloadedBytes] = useState(0);
+  const [totalBytes, setTotalBytes] = useState<number | null>(null);
+  const [lastChunkBytes, setLastChunkBytes] = useState(0);
 
   // Załaduj status autostartu
   useEffect(() => {
@@ -58,6 +67,9 @@ export default function SystemTab() {
     setUpdateState('checking');
     setUpdateError(null);
     setUpdateInfo(null);
+    setDownloadedBytes(0);
+    setTotalBytes(null);
+    setLastChunkBytes(0);
     try {
       const update = await check();
       if (update?.available) {
@@ -78,10 +90,25 @@ export default function SystemTab() {
 
   const handleInstallUpdate = async () => {
     setUpdateState('downloading');
+    setUpdateError(null);
+    setDownloadedBytes(0);
+    setTotalBytes(null);
+    setLastChunkBytes(0);
     try {
       const update = await check();
       if (update?.available) {
-        await update.downloadAndInstall();
+        await update.downloadAndInstall((event) => {
+          if (event.event === 'Started') {
+            setDownloadedBytes(0);
+            setLastChunkBytes(0);
+            setTotalBytes(event.data.contentLength ?? null);
+            return;
+          }
+          if (event.event === 'Progress') {
+            setLastChunkBytes(event.data.chunkLength);
+            setDownloadedBytes(prev => prev + event.data.chunkLength);
+          }
+        });
         setUpdateState('done');
       }
     } catch (e: unknown) {
@@ -89,6 +116,11 @@ export default function SystemTab() {
       setUpdateState('error');
     }
   };
+
+  const progressPercent = totalBytes && totalBytes > 0
+    ? Math.min(100, Math.round((downloadedBytes / totalBytes) * 100))
+    : null;
+  const remainingBytes = totalBytes != null ? Math.max(totalBytes - downloadedBytes, 0) : null;
 
   return (
     <div className="space-y-6">
@@ -168,9 +200,26 @@ export default function SystemTab() {
           </div>
         )}
         {updateState === 'downloading' && (
-          <div className="flex items-center gap-2 text-sm text-white/60 mb-3">
-            <RefreshCw size={14} className="animate-spin" />
-            Pobieranie i instalacja aktualizacji…
+          <div className="mb-3 rounded-lg border border-white/10 bg-white/5 p-3">
+            <div className="flex items-center gap-2 text-sm text-white/80">
+              <RefreshCw size={14} className="animate-spin" />
+              Pobieranie i instalacja aktualizacji…
+            </div>
+
+            <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/30">
+              <div
+                className="h-full rounded-full bg-[var(--color-accent)] transition-[width] duration-200"
+                style={{ width: progressPercent != null ? `${progressPercent}%` : '12%' }}
+              />
+            </div>
+
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-white/60">
+              <span>Pobrano: {formatBytes(downloadedBytes)}</span>
+              <span>Całość: {totalBytes != null ? formatBytes(totalBytes) : 'rozmiar nieznany'}</span>
+              <span>Pozostało: {remainingBytes != null ? formatBytes(remainingBytes) : '—'}</span>
+              <span>Chunk: {lastChunkBytes > 0 ? formatBytes(lastChunkBytes) : '—'}</span>
+              {progressPercent != null && <span>Postęp: {progressPercent}%</span>}
+            </div>
           </div>
         )}
         {updateState === 'done' && (

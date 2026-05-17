@@ -741,12 +741,16 @@ export default function Finances() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [rev, inv, totalInv, totalRev] = await Promise.all([
-        getMonthlyRevenue(year, month),
-        getMonthlyInvoices(year, month),
-        getTotalInvestments(),
-        getTotalRevenue(),
-      ]);
+      const fail = (scope: string, error: unknown) => {
+        const detail = error instanceof Error ? error.message : String(error);
+        throw new Error(`${scope}: ${detail}`);
+      };
+
+      const rev = await getMonthlyRevenue(year, month).catch(error => fail('Przychody', error));
+      const inv = await getMonthlyInvoices(year, month).catch(error => fail('Faktury', error));
+      const totalInv = await getTotalInvestments().catch(error => fail('Inwestycje', error));
+      const totalRev = await getTotalRevenue().catch(error => fail('Suma przychodów', error));
+
       setRevenues(rev);
       setInvoices(inv);
       setTotalInvestments(totalInv);

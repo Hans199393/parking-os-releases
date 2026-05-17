@@ -1,5 +1,5 @@
 ; Parking.OS NSIS Installer Hooks
-; W v2026.1.01 runtime kamer jest zawsze instalowany,
+; Od v2026.1.01 runtime kamer jest zawsze instalowany,
 ; żeby aplikacja działała poprawnie na gołym systemie i po update.
 
 !include "LogicLib.nsh"
