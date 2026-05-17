@@ -33,6 +33,13 @@ npm run tauri build
 # Instalator: src-tauri/target/release/bundle/msi/
 ```
 
+## Dokumentacja aktualizacji
+
+Każda paczka update musi mieć własny plik `README.md` opisujący zakres zmian, testy i artefakty.
+
+- Szablon: `updates/README_TEMPLATE.md`
+- Bieżąca dokumentacja update: `updates/v2026.1.01/README.md`
+
 Konfiguracja środowiska — zmienne w `src-tauri/tauri.conf.json` i Tauri Secrets.  
 Wartości `SUPABASE_URL` i `SUPABASE_ANON_KEY` są wbudowane w build (patrz `src/supabase.ts`).
 

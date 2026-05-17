@@ -62,6 +62,13 @@ export const PERMISSION_MODULES: PermModule[] = [
     ],
   },
   {
+    id: 'radio', label: 'Radio internetowe', pageId: 'radio',
+    actions: [
+      { id: 'view', label: 'Zobacz panel radia' },
+      { id: 'use', label: 'Odtwarzaj i steruj' },
+    ],
+  },
+  {
     id: 'admin', label: 'Panel WWW (CMS)', pageId: 'admin',
     actions: [
       { id: 'view',          label: 'Zobacz panel' },
@@ -131,6 +138,7 @@ export const PERMISSION_PRESETS: PermPreset[] = [
       'cameras.view', 'cameras.detector',
       'reservations.view', 'reservations.create', 'reservations.edit', 'reservations.no_show',
       'finances.view', 'finances.add_income', 'finances.add_expense',
+      'radio.view', 'radio.use',
       'chat.view', 'chat.use',
       'email.view', 'email.reply',
       'logs.view',
@@ -145,6 +153,7 @@ export const PERMISSION_PRESETS: PermPreset[] = [
       'cameras.view', 'cameras.roi_edit', 'cameras.detector',
       'reservations.view', 'reservations.create', 'reservations.edit', 'reservations.delete', 'reservations.restore', 'reservations.no_show', 'reservations.ban', 'reservations.unban',
       'finances.view', 'finances.add_income', 'finances.add_expense', 'finances.edit', 'finances.delete', 'finances.export',
+      'radio.view', 'radio.use',
       'admin.view', 'admin.edit_content',
       'chat.view', 'chat.use', 'chat.reset',
       'email.view', 'email.send', 'email.reply', 'email.delete',

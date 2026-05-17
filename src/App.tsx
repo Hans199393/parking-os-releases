@@ -7,11 +7,15 @@ import Cameras from './components/Cameras/Cameras';
 import Reservations from './components/Reservations/Reservations';
 import Finances from './components/Finances/Finances';
 import AdminPanel from './components/AdminPanel/AdminPanel';
+import Radio from './components/Radio/Radio';
 import Settings from './components/Settings/Settings';
 import Chat from './components/Chat/Chat';
 import Email from './components/Email/Email';
 import Logs from './components/Logs/Logs';
 import SyncManager from './components/Sync/SyncManager';
+import FloatingRadioPanel from './components/Radio/FloatingRadioPanel';
+import RadioFAB from './components/Radio/RadioFAB';
+import { useRadioPlayer } from './components/Radio/useRadioPlayer';
 import ShortcutsHelp from './components/shared/ShortcutsHelp';
 import CommandPalette from './components/CommandPalette/CommandPalette';
 import FloatingChatPanel from './components/Chat/FloatingChatPanel';
@@ -24,7 +28,7 @@ import { getStore } from './lib/store';
 import { applyAccentColor, ACCENT_COLORS } from './components/Settings/Settings';
 import { signOut, verifyCurrentPassword, changePassword } from './lib/auth';
 import { getCurrentUser, setCurrentUser as setSessionUser, SUPERADMIN_EMAIL, normalizePermissions, type AppUser } from './lib/session';
-import { expandAllPerms } from './lib/permissions';
+import { checkPermission, expandAllPerms } from './lib/permissions';
 import { useIdleLock } from './lib/idleLock';
 import { getSupabaseClient } from './lib/supabase';
 import { audit } from './lib/audit';
@@ -229,6 +233,9 @@ export default function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   // Iter 13: Ctrl+J — Pływający panel chat (à la Copilot)
   const [chatPanelOpen, setChatPanelOpen] = useState(false);
+  const canUseRadio = !!currentUser && (currentUser.role === 'superadmin' || checkPermission(currentUser.permissions, 'radio.use'));
+  const radio = useRadioPlayer(canUseRadio);
+
   useEffect(() => {
     if (!authenticated) return;
     const onKey = (e: KeyboardEvent) => {
@@ -379,6 +386,11 @@ export default function App() {
         {page === 'finances' && (
           <Finances />
         )}
+        {page === 'radio' && (
+          <div className="absolute inset-0 overflow-y-auto p-6 custom-scroll">
+            <Radio player={radio} />
+          </div>
+        )}
         {page === 'admin' && (
           <AdminPanel />
         )}
@@ -417,6 +429,18 @@ export default function App() {
         open={chatPanelOpen}
         onClose={() => setChatPanelOpen(false)}
         onMinimize={() => setChatPanelOpen(false)}
+      />
+      {authenticated && canUseRadio && radio.panelOpen && page !== 'radio' && (
+        <FloatingRadioPanel
+          player={radio}
+          onClose={() => radio.setPanelOpen(false)}
+          onOpenRadioPage={() => handleNavigate('radio')}
+        />
+      )}
+      <RadioFAB
+        visible={authenticated && canUseRadio && page !== 'radio' && !radio.panelOpen && (!!radio.currentStation || radio.isPlaying)}
+        onClick={() => radio.setPanelOpen(true)}
+        pulse={radio.isPlaying}
       />
       <ChatFAB visible={authenticated && !chatPanelOpen} onClick={() => setChatPanelOpen(true)} />
     </div>

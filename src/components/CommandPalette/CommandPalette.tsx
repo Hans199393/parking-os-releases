@@ -19,7 +19,7 @@
  */
 
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { Search, Bot, Zap, X, Cog, Wallet, Calendar, Camera, MessageCircle, BarChart3, Mail, FileText, Variable } from 'lucide-react';
+import { Search, Bot, Zap, X, Cog, Wallet, Calendar, Camera, MessageCircle, BarChart3, Mail, FileText, Variable, Headphones } from 'lucide-react';
 import type { Page } from '../Sidebar/Sidebar';
 import OrzelChatBody from '../Chat/OrzelChatBody';
 import { usePerm } from '../../lib/usePerm';
@@ -257,6 +257,7 @@ function buildSearchItems(onNavigate: (page: Page) => void): SearchItem[] {
     nav('cameras',      'Kamery',              'Podgląd LPR + wjazdy/wyjazdy',                     ['camera', 'lpr', 'wjazd'], <Camera size={14} />),
     nav('reservations', 'Rezerwacje',          'Lista rezerwacji + nowa',                          ['booking', 'rezerwacja', 'klient'], <Calendar size={14} />),
     nav('finances',     'Finanse',             'Przychody, faktury, raporty',                      ['finance', 'kasa', 'utarg', 'pieniądze', 'faktury'], <Wallet size={14} />),
+    nav('radio',        'Radio internetowe',   'Wybór stacji, głośność i panel pływający',         ['muzyka', 'stacje', 'audio', 'stream'], <Headphones size={14} />),
     nav('chat',         'Czat operatora',      'Wiadomości z klientami',                            ['messenger', 'wiadomości'], <MessageCircle size={14} />),
     nav('email',        'E-maile',             'Skrzynka i odpowiedzi',                            ['mail', 'gmail', 'skrzynka'], <Mail size={14} />),
     nav('logs',         'Dziennik zdarzeń',    'Logi aplikacji i audyt',                           ['logi', 'audit', 'historia'], <FileText size={14} />),

@@ -609,6 +609,60 @@ async fn fetch_snapshot(url: String) -> Result<String, String> {
     Ok(format!("data:{};base64,{}", mime, b64))
 }
 
+#[tauri::command]
+async fn camera_runtime_status(
+    app: AppHandle,
+    state: tauri::State<'_, ProxyProcess>,
+) -> Result<CameraRuntimeStatus, String> {
+    let resource_dir = app.path().resource_dir().unwrap_or_default();
+    let server_js = resource_dir.join("rtsp-proxy").join("server.js");
+    let bundled_node = resource_dir.join("bin").join("node.exe");
+    let bundled_ffmpeg = resource_dir.join("bin").join("ffmpeg.exe");
+
+    let proxy_process_running = {
+        let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+        if let Some(child) = guard.as_mut() {
+            matches!(child.try_wait(), Ok(None))
+        } else {
+            false
+        }
+    };
+
+    let proxy_health_ok = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(1200))
+        .build()
+    {
+        Ok(client) => match client.get("http://127.0.0.1:8888/").send().await {
+            Ok(response) => response.status().is_success(),
+            Err(_) => false,
+        },
+        Err(_) => false,
+    };
+
+    let server_js_exists = server_js.exists();
+    let bundled_node_exists = bundled_node.exists();
+    let bundled_ffmpeg_exists = bundled_ffmpeg.exists();
+
+    let issue = if !server_js_exists || !bundled_node_exists || !bundled_ffmpeg_exists {
+        Some("Brakuje lokalnego runtime kamer. Ten komputer potrzebuje pełnego update z pakietem Node.js, ffmpeg i RTSP proxy.".to_string())
+    } else if !proxy_process_running {
+        Some("Lokalny proxy kamer nie wystartował po uruchomieniu aplikacji.".to_string())
+    } else if !proxy_health_ok {
+        Some("Lokalny proxy kamer działa nieprawidłowo albo nie odpowiada na http://localhost:8888/.".to_string())
+    } else {
+        None
+    };
+
+    Ok(CameraRuntimeStatus {
+        server_js_exists,
+        bundled_node_exists,
+        bundled_ffmpeg_exists,
+        proxy_process_running,
+        proxy_health_ok,
+        issue,
+    })
+}
+
 // ─── Splashscreen ────────────────────────────────────────────────────────────
 /// Zamyka okno splashscreen i pokazuje główne okno aplikacji.
 /// Wywoływane z React po zakończeniu inicjalizacji.
@@ -631,6 +685,16 @@ pub struct DbSyncMeta {
     pub size_bytes: u64,
     pub last_modified: String,
     pub path: String,
+}
+
+#[derive(Serialize)]
+pub struct CameraRuntimeStatus {
+    pub server_js_exists: bool,
+    pub bundled_node_exists: bool,
+    pub bundled_ffmpeg_exists: bool,
+    pub proxy_process_running: bool,
+    pub proxy_health_ok: bool,
+    pub issue: Option<String>,
 }
 
 /// Zwraca bajty pliku SQLite jako base64 — do uploadowania przez JS do Supabase Storage.
@@ -803,18 +867,41 @@ pub fn run() {
         .manage(DetectorProcess(Arc::new(Mutex::new(None))))
         .manage(ProxyProcess(Arc::new(Mutex::new(None))))
         .setup(|app| {
+            // ── Preload default settings on first install ──────────────────
+            let resource_dir = app.path().resource_dir().unwrap_or_default();
+            if let Ok(app_data_dir) = app.path().app_data_dir() {
+                let settings_path = app_data_dir.join("settings.json");
+                if !settings_path.exists() {
+                    let default_settings = resource_dir.join("default-settings.json");
+                    if default_settings.exists() {
+                        let _ = std::fs::create_dir_all(&app_data_dir);
+                        let _ = std::fs::copy(&default_settings, &settings_path);
+                    }
+                }
+            }
             // ── Auto-start RTSP→HLS proxy ──────────────────────────────────
             let resource_dir = app.path().resource_dir().unwrap_or_default();
             let server_js = resource_dir.join("rtsp-proxy").join("server.js");
             if server_js.exists() {
                 let proxy_dir = resource_dir.join("rtsp-proxy");
+                // Bundled node.exe (prod) or system node (dev)
+                let bundled_node = resource_dir.join("bin").join("node.exe");
+                let node_cmd = if bundled_node.exists() {
+                    bundled_node.to_string_lossy().to_string()
+                } else {
+                    "node".to_string()
+                };
+                // Bundled ffmpeg (prod) > dev path > system ffmpeg
+                let bundled_ffmpeg = resource_dir.join("bin").join("ffmpeg.exe");
                 let dev_ffmpeg = r"G:\parking_2026\ffmpeg-8.1-essentials_build\bin\ffmpeg.exe";
-                let ffmpeg_path = if std::path::Path::new(dev_ffmpeg).exists() {
+                let ffmpeg_path = if bundled_ffmpeg.exists() {
+                    bundled_ffmpeg.to_string_lossy().to_string()
+                } else if std::path::Path::new(dev_ffmpeg).exists() {
                     dev_ffmpeg.to_string()
                 } else {
                     "ffmpeg".to_string()
                 };
-                let mut cmd = std::process::Command::new("node");
+                let mut cmd = std::process::Command::new(&node_cmd);
                 cmd.arg(&server_js)
                     .current_dir(&proxy_dir)
                     .env("FFMPEG_PATH", &ffmpeg_path)
@@ -843,6 +930,7 @@ pub fn run() {
             verify_password,
             send_notification,
             fetch_snapshot,
+            camera_runtime_status,
             spawn_pwa,
             stop_pwa,
             spawn_detector,

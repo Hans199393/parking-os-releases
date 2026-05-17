@@ -24,7 +24,7 @@ export const SUPERADMIN_EMAIL = 'klosekmichal@gmail.com';
 
 // Page id'ki w sidebarze — kolejność = kolejność w menu.
 export const ALL_PAGES = [
-  'dashboard', 'cameras', 'reservations', 'finances', 'admin', 'chat', 'email', 'settings',
+  'dashboard', 'cameras', 'reservations', 'finances', 'radio', 'admin', 'chat', 'email', 'sync', 'logs', 'settings',
 ] as const;
 
 let _user: AppUser | null = null;

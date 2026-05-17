@@ -2,6 +2,7 @@
  * SystemTab — uruchamianie z Windows + sprawdzanie aktualizacji.
  */
 import { useState, useEffect } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { check } from '@tauri-apps/plugin-updater';
 import { Power, RefreshCw, Download, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
@@ -21,6 +22,7 @@ type UpdateState = 'idle' | 'checking' | 'available' | 'none' | 'downloading' | 
 export default function SystemTab() {
   const [autostartEnabled, setAutostartEnabled] = useState<boolean | null>(null);
   const [autostartBusy, setAutostartBusy] = useState(false);
+  const [currentVersion, setCurrentVersion] = useState('—');
 
   const [updateState, setUpdateState] = useState<UpdateState>('idle');
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
@@ -31,6 +33,12 @@ export default function SystemTab() {
     invoke<AutostartStatus>('autostart_get_status')
       .then(s => setAutostartEnabled(s.enabled))
       .catch(() => setAutostartEnabled(false));
+  }, []);
+
+  useEffect(() => {
+    getVersion()
+      .then(version => setCurrentVersion(version))
+      .catch(() => setCurrentVersion('dev'));
   }, []);
 
   const handleAutostartToggle = async () => {
@@ -84,7 +92,12 @@ export default function SystemTab() {
 
   return (
     <div className="space-y-6">
-      <h2 className="text-lg font-bold text-[var(--color-text)]">System</h2>
+      <div>
+        <h2 className="text-lg font-bold text-[var(--color-text)]">System</h2>
+        <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+          Bieżąca wersja aplikacji: <span className="font-mono text-amber-300">v{currentVersion}</span>
+        </p>
+      </div>
 
       {/* Autostart */}
       <div className="glass-strong rounded-[var(--radius-lg)] p-5 border border-[var(--color-border)]">

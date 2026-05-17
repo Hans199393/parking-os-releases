@@ -1,14 +1,17 @@
-﻿import { LayoutDashboard, Camera, CalendarDays, DollarSign, Settings, Smartphone, MessageCircle, Mail, LogOut, ClipboardList, RefreshCw } from 'lucide-react';
+﻿import { useEffect, useState } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
+import { LayoutDashboard, Camera, CalendarDays, DollarSign, Settings, Smartphone, MessageCircle, Mail, LogOut, ClipboardList, RefreshCw, Headphones } from 'lucide-react';
 import type { AppUser } from '../../lib/session';
 import { checkPermission } from '../../lib/permissions';
 
-export type Page = 'dashboard' | 'cameras' | 'reservations' | 'finances' | 'admin' | 'chat' | 'email' | 'settings' | 'logs' | 'sync';
+export type Page = 'dashboard' | 'cameras' | 'reservations' | 'finances' | 'radio' | 'admin' | 'chat' | 'email' | 'settings' | 'logs' | 'sync';
 
 const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
   { id: 'cameras', label: 'Kamery', icon: <Camera size={20} /> },
   { id: 'reservations', label: 'Rezerwacje', icon: <CalendarDays size={20} /> },
   { id: 'finances', label: 'Finanse', icon: <DollarSign size={20} /> },
+  { id: 'radio', label: 'Radio', icon: <Headphones size={20} /> },
   { id: 'chat', label: 'Czat Orzeł', icon: <MessageCircle size={20} /> },
   { id: 'email', label: 'Skrzynka', icon: <Mail size={20} /> },
   { id: 'sync', label: 'Synchronizacja', icon: <RefreshCw size={20} /> },
@@ -29,6 +32,14 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ current, onChange, reservationBadge, chatBadge, onOpenPwa, onStopPwa, pwaStatus, user, onLogout }: SidebarProps) {
+  const [appVersion, setAppVersion] = useState('—');
+
+  useEffect(() => {
+    getVersion()
+      .then(version => setAppVersion(version))
+      .catch(() => setAppVersion('dev'));
+  }, []);
+
   const visibleItems = navItems.filter(item =>
     !user || user.role === 'superadmin' || checkPermission(user.permissions, item.id)
   );
@@ -133,6 +144,9 @@ export default function Sidebar({ current, onChange, reservationBadge, chatBadge
             </div>
           </div>
         )}
+        <p className="text-center text-[10px] font-mono text-amber-300/50">
+          Parking.OS v{appVersion}
+        </p>
         {onLogout && (
           <button
             onClick={onLogout}

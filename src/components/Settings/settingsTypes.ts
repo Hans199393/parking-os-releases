@@ -22,6 +22,10 @@ export const ALL_SETTINGS_KEYS = [
   'admin_url', 'admin_token',
   // Wygląd
   'session_timeout', 'confirm_exit', 'accent_color',
+  // Radio internetowe (lokalne)
+  'radio_autoplay', 'radio_volume', 'radio_muted',
+  'radio_last_station_id', 'radio_last_station_name', 'radio_last_stream_url',
+  'radio_panel_open', 'radio_favorites',
   // Cloud-mirrored (Supabase settings) — cache lokalny
   'rate_basic', 'rate_reservation', 'rate_after_hours',
   'open_from', 'open_to', 'open_days',

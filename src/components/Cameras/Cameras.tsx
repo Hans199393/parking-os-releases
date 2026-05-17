@@ -324,10 +324,21 @@ interface CamerasProps {
   cam4HlsUrl: string | null;
 }
 
+interface CameraRuntimeStatus {
+  server_js_exists: boolean;
+  bundled_node_exists: boolean;
+  bundled_ffmpeg_exists: boolean;
+  proxy_process_running: boolean;
+  proxy_health_ok: boolean;
+  issue: string | null;
+}
+
 export default function Cameras({ cam1SnapshotUrl, cam1RtspUrl, cam1HlsUrl, cam2SnapshotUrl, cam2RtspUrl, cam2HlsUrl, cam3SnapshotUrl, cam3RtspUrl, cam3HlsUrl, cam4SnapshotUrl, cam4RtspUrl, cam4HlsUrl }: CamerasProps) {
   const [fullscreenCam, setFullscreenCam] = useState<number | null>(null);
   const [roiOverlay, setRoiOverlay] = useState<{ roi: Roi; line: number } | null>(null);
   const [showRoiOverlay, setShowRoiOverlay] = useState(true);
+  const [cameraRuntime, setCameraRuntime] = useState<CameraRuntimeStatus | null>(null);
+  const [isCheckingRuntime, setIsCheckingRuntime] = useState(false);
 
   // Wczytaj ustawienie show_roi_overlay ze store
   useEffect(() => {
@@ -355,6 +366,40 @@ export default function Cameras({ cam1SnapshotUrl, cam1RtspUrl, cam1HlsUrl, cam2
   ];
 
   const anyConfigured = cameras.some(c => c.snapshotUrl || c.hlsUrl || c.rtspUrl);
+  const needsProxy = cameras.some(c => c.hlsUrl || c.rtspUrl);
+  const missingRuntimeParts = cameraRuntime
+    ? [
+        !cameraRuntime.server_js_exists ? 'rtsp-proxy/server.js' : null,
+        !cameraRuntime.bundled_node_exists ? 'bin/node.exe' : null,
+        !cameraRuntime.bundled_ffmpeg_exists ? 'bin/ffmpeg.exe' : null,
+      ].filter((value): value is string => !!value)
+    : [];
+
+  const loadCameraRuntime = useCallback(async () => {
+    if (!needsProxy) {
+      setCameraRuntime(null);
+      return;
+    }
+    setIsCheckingRuntime(true);
+    try {
+      setCameraRuntime(await invoke<CameraRuntimeStatus>('camera_runtime_status'));
+    } catch {
+      setCameraRuntime({
+        server_js_exists: false,
+        bundled_node_exists: false,
+        bundled_ffmpeg_exists: false,
+        proxy_process_running: false,
+        proxy_health_ok: false,
+        issue: 'Nie udało się odczytać diagnostyki lokalnego proxy kamer.',
+      });
+    } finally {
+      setIsCheckingRuntime(false);
+    }
+  }, [needsProxy]);
+
+  useEffect(() => {
+    void loadCameraRuntime();
+  }, [loadCameraRuntime]);
 
   // DetectorPanel kompaktowy — do wbudowania w kartę CAM 1
   const detectorBar = (
@@ -416,6 +461,34 @@ export default function Cameras({ cam1SnapshotUrl, cam1RtspUrl, cam1HlsUrl, cam2
           </div>
         )}
       </div>
+
+      {needsProxy && cameraRuntime?.issue && (
+        <div className="glass-strong border border-red-500/30 rounded-[var(--radius-lg)] p-4 flex-shrink-0 ring-1 ring-red-500/10">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <h3 className="text-red-300 font-semibold text-xs mb-1 uppercase tracking-wider">Diagnostyka proxy kamer</h3>
+              <p className="text-[var(--color-text)] text-sm">{cameraRuntime.issue}</p>
+              {missingRuntimeParts.length > 0 ? (
+                <p className="text-[var(--color-text-muted)] text-xs mt-1">
+                  Brakuje plików: <span className="font-mono text-red-200">{missingRuntimeParts.join(', ')}</span>
+                </p>
+              ) : (
+                <p className="text-[var(--color-text-muted)] text-xs mt-1">
+                  Sprawdź, czy port 8888 nie jest zajęty i uruchom aplikację ponownie po instalacji update.
+                </p>
+              )}
+            </div>
+
+            <button
+              onClick={() => void loadCameraRuntime()}
+              className="flex items-center gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs font-semibold bg-white/6 hover:bg-white/10 text-white border border-white/10 transition-colors"
+            >
+              <RefreshCw size={13} className={isCheckingRuntime ? 'animate-spin' : ''} />
+              Sprawdź ponownie
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Instrukcja gdy brak kamer */}
       {!anyConfigured && (

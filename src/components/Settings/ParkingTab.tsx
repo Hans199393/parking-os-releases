@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import { Banknote, MapPin, Clock, CalendarPlus, Megaphone, Car, Cloud, Check, Lock } from 'lucide-react';
 import { Input, Button } from '../shared/UI';
-import { getConfigs } from '../../lib/supabase';
+import { getConfigs, setConfigs, getExtraOpenDays, addExtraOpenDay, deleteExtraOpenDay } from '../../lib/supabase';
 import { audit } from '../../lib/audit';
 import { usePerm } from '../../lib/usePerm';
 
@@ -67,38 +67,17 @@ export default function ParkingTab({ values, set, patch }: Props) {
 
   // Auto-fetch dni dodatkowych
   useEffect(() => {
-    if (values.admin_url && values.admin_token) void fetchExtraDays();
+    if (values.supabase_url && values.supabase_key) void fetchExtraDays();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [values.admin_url, values.admin_token]);
-
-  const adminCall = async (body: object) => {
-    const adminUrl = (values.admin_url ?? '').trim().replace(/\/+$/, '');
-    const adminToken = (values.admin_token ?? '').trim();
-    if (!adminUrl) throw new Error('Brak admin_url (Integracje → Panel WWW)');
-    if (!adminToken) throw new Error('Brak admin_token (Integracje → Panel WWW)');
-    const resp = await fetch(`${adminUrl}/api/admin`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${adminToken}` },
-      body: JSON.stringify(body),
-    });
-    const json = await resp.json().catch(() => ({}));
-    if (!resp.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
-    return json;
-  };
+  }, [values.supabase_url, values.supabase_key]);
 
   const fetchExtraDays = async () => {
-    const adminUrl = (values.admin_url ?? '').trim().replace(/\/+$/, '');
-    const adminToken = (values.admin_token ?? '').trim();
-    if (!adminUrl || !adminToken) return;
+    if (!values.supabase_url || !values.supabase_key) return;
     setExtraDaysLoading(true);
     setExtraDaysError(null);
     try {
-      const resp = await fetch(`${adminUrl}/api/admin?action=extra_open_days`, {
-        headers: { 'Authorization': `Bearer ${adminToken}` },
-      });
-      const json = await resp.json();
-      if (!resp.ok) throw new Error(json?.error || `HTTP ${resp.status}`);
-      setExtraDays(json.extraOpenDays || []);
+      const days = await getExtraOpenDays();
+      setExtraDays(days.filter(day => day.active !== false));
     } catch (e) {
       setExtraDaysError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -112,7 +91,7 @@ export default function ParkingTab({ values, set, patch }: Props) {
     setExtraDaysError(null);
     setExtraDayBusy(true);
     try {
-      await adminCall({ action: 'add_extra_day', date: isoToPlDate(extraDayInput), note: null });
+      await addExtraOpenDay(isoToPlDate(extraDayInput));
       void audit('action', 'extra_day_added', { metadata: { date: extraDayInput }, description: `Dodano dzień otwarty: ${extraDayInput}` });
       setExtraDayInput('');
       await fetchExtraDays();
@@ -127,7 +106,7 @@ export default function ParkingTab({ values, set, patch }: Props) {
     if (!perm.guard('settings.edit_parking', 'usunięcie dnia dodatkowego')) return;
     setExtraDaysError(null);
     try {
-      await adminCall({ action: 'remove_extra_day', id });
+      await deleteExtraOpenDay(id);
       void audit('action', 'extra_day_removed', { metadata: { id, date }, description: `Usunięto dzień otwarty: ${date}`, severity: 'warning' });
       await fetchExtraDays();
     } catch (e) {
@@ -144,7 +123,8 @@ export default function ParkingTab({ values, set, patch }: Props) {
       for (const k of PARKING_CLOUD_KEYS) {
         if (values[k] != null && values[k] !== '') settings[k] = values[k];
       }
-      await adminCall({ action: 'settings_save', settings });
+      if (Object.keys(settings).length === 0) throw new Error('Brak danych parkingu do synchronizacji');
+      await setConfigs(settings);
       void audit('action', 'parking_settings_cloud_save', {
         description: 'Zsynchronizowano ustawienia parkingu z chmurą',
         metadata: { keys: Object.keys(settings) },

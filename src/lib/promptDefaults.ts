@@ -919,6 +919,8 @@ export const PROMPT_PLACEHOLDER_DEFAULTS: Record<string, string> = {
   owner_email: 'kontakt@parkingsobieszewo.pl',
   parking_name: 'Parking niestrzeżony płatny "Michał Kłos"',
   parking_address: 'ul. Turystyczna 69, Gdańsk 80-690 (Wyspa Sobieszewska)',
+  parking_nip: '583-318-56-70',
+  parking_capacity: '10',
 };
 
 /** typ profilu przyjmowany przez builder */

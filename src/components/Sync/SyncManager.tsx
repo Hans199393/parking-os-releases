@@ -29,8 +29,12 @@ interface RevenueRow {
   date: string;
   qty_1: number; qty_2: number; qty_5: number; qty_10: number;
   qty_20: number; qty_50: number; qty_100: number; qty_200: number; qty_500: number;
+  base_qty_1: number; base_qty_2: number; base_qty_5: number; base_qty_10: number;
+  base_qty_20: number; base_qty_50: number; base_qty_100: number; base_qty_200: number; base_qty_500: number;
   card: number; blik: number;
   notes: string | null;
+  weather: string | null;
+  temperature: number | null;
 }
 
 interface SyncRow {
@@ -66,6 +70,72 @@ function calcTotal(row: RevenueRow): number {
     row.qty_10 * 10 + row.qty_20 * 20 + row.qty_50 * 50 +
     row.qty_100 * 100 + row.qty_200 * 200 + row.qty_500 * 500 +
     row.card + row.blik;
+}
+
+async function applyMergedSelection(rows: SyncRow[]): Promise<void> {
+  const localDb = await Database.load('sqlite:parking_os.db');
+  try {
+    await localDb.execute('BEGIN IMMEDIATE');
+
+    for (const row of rows) {
+      if (row.choice !== 'remote') continue;
+
+      if (!row.remote) {
+        await localDb.execute('DELETE FROM daily_revenue WHERE date = $1', [row.date]);
+        continue;
+      }
+
+      const remote = row.remote;
+      await localDb.execute(`
+        INSERT INTO daily_revenue (
+          date,
+          qty_1, qty_2, qty_5, qty_10, qty_20, qty_50, qty_100, qty_200, qty_500,
+          base_qty_1, base_qty_2, base_qty_5, base_qty_10, base_qty_20, base_qty_50, base_qty_100, base_qty_200, base_qty_500,
+          card, blik, notes, weather, temperature
+        ) VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11, $12, $13, $14, $15, $16, $17, $18, $19,
+          $20, $21, $22, $23, $24
+        )
+        ON CONFLICT(date) DO UPDATE SET
+          qty_1 = excluded.qty_1,
+          qty_2 = excluded.qty_2,
+          qty_5 = excluded.qty_5,
+          qty_10 = excluded.qty_10,
+          qty_20 = excluded.qty_20,
+          qty_50 = excluded.qty_50,
+          qty_100 = excluded.qty_100,
+          qty_200 = excluded.qty_200,
+          qty_500 = excluded.qty_500,
+          base_qty_1 = excluded.base_qty_1,
+          base_qty_2 = excluded.base_qty_2,
+          base_qty_5 = excluded.base_qty_5,
+          base_qty_10 = excluded.base_qty_10,
+          base_qty_20 = excluded.base_qty_20,
+          base_qty_50 = excluded.base_qty_50,
+          base_qty_100 = excluded.base_qty_100,
+          base_qty_200 = excluded.base_qty_200,
+          base_qty_500 = excluded.base_qty_500,
+          card = excluded.card,
+          blik = excluded.blik,
+          notes = excluded.notes,
+          weather = excluded.weather,
+          temperature = excluded.temperature
+      `, [
+        remote.date,
+        remote.qty_1, remote.qty_2, remote.qty_5, remote.qty_10, remote.qty_20, remote.qty_50, remote.qty_100, remote.qty_200, remote.qty_500,
+        remote.base_qty_1, remote.base_qty_2, remote.base_qty_5, remote.base_qty_10, remote.base_qty_20, remote.base_qty_50, remote.base_qty_100, remote.base_qty_200, remote.base_qty_500,
+        remote.card, remote.blik, remote.notes, remote.weather, remote.temperature,
+      ]);
+    }
+
+    await localDb.execute('COMMIT');
+  } catch (error) {
+    try { await localDb.execute('ROLLBACK'); } catch { /* ignore */ }
+    throw error;
+  } finally {
+    await localDb.close().catch(() => false);
+  }
 }
 
 // ── Główny komponent ─────────────────────────────────────────────────────────
@@ -157,6 +227,8 @@ export default function SyncManager() {
 
       const localRows: RevenueRow[] = await localDb.select('SELECT * FROM daily_revenue ORDER BY date', []);
       const remoteRows: RevenueRow[] = await remoteDb.select('SELECT * FROM daily_revenue ORDER BY date', []);
+      await localDb.close().catch(() => false);
+      await remoteDb.close().catch(() => false);
 
       // Merge wszystkich dat
       const allDates = new Set([
@@ -192,11 +264,22 @@ export default function SyncManager() {
 
   // ── ZASTOSUJ SYNC ─────────────────────────────────────────────────────────
 
-  const handleApply = async (action: 'replace' | 'keep') => {
+  const handleApply = async (action: 'replace' | 'keep' | 'merge') => {
     setStep('applying');
-    setStatusMsg(action === 'replace' ? 'Zastępowanie bazy…' : 'Zachowywanie lokalnej bazy…');
+    setStatusMsg(
+      action === 'replace'
+        ? 'Zastępowanie bazy…'
+        : action === 'merge'
+        ? 'Scalanie wybranych dni do lokalnej bazy…'
+        : 'Zachowywanie lokalnej bazy…'
+    );
     try {
-      await invoke('db_apply_sync', { action });
+      if (action === 'merge') {
+        await applyMergedSelection(diffRows);
+        await invoke('db_delete_temp');
+      } else {
+        await invoke('db_apply_sync', { action });
+      }
 
       // Usuń transit z Supabase Storage
       setStatusMsg('Usuwanie pliku transit z chmury…');
@@ -208,12 +291,14 @@ export default function SyncManager() {
       setSuccessMsg(
         action === 'replace'
           ? '✅ Dane zsynchronizowane! Aplikacja uruchomi się ponownie.'
+          : action === 'merge'
+          ? '✅ Wybrane dni zostały zapisane lokalnie. Aplikacja uruchomi się ponownie.'
           : '✅ Zachowano lokalną bazę. Plik transit usunięty z chmury.'
       );
       setDiffRows([]);
       setRemoteMeta(null);
 
-      if (action === 'replace') {
+      if (action === 'replace' || action === 'merge') {
         // Restart po 2s żeby DB plugin zresetował połączenie
         setTimeout(() => invoke('app_restart'), 2000);
       }
@@ -489,11 +574,9 @@ export default function SyncManager() {
           <div className="flex flex-wrap gap-3">
             <button
               onClick={() => {
-                // Jeśli wszystkie = remote → replace całe db; inaczej apply row-by-row
-                // Dla prostoty w tej wersji: jeśli większość wybrana jako remote → replace
-                // TODO iter 14: per-row merge
                 const allRemote = diffRows.every(r => r.choice === 'remote');
-                handleApply(allRemote ? 'replace' : 'keep');
+                const anyRemote = diffRows.some(r => r.choice === 'remote');
+                handleApply(allRemote ? 'replace' : anyRemote ? 'merge' : 'keep');
               }}
               disabled={isLoading}
               className="flex items-center gap-2 px-6 py-2.5 rounded-xl font-semibold text-sm

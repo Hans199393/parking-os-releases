@@ -1,5 +1,6 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { getStore } from './store';
+import { getDefaultSetting } from './defaultSettings';
 
 export interface Database {
   public: {
@@ -104,10 +105,15 @@ export interface Database {
 
 let supabaseInstance: SupabaseClient<Database> | null = null;
 
+function withDefault(value: string | null | undefined, key: string): string {
+  const trimmed = value?.trim() ?? '';
+  return trimmed || getDefaultSetting(key) || '';
+}
+
 export async function isConfigured(): Promise<boolean> {
   const store = await getStore();
-  const url = await store.get<string>('supabase_url') ?? '';
-  const key = await store.get<string>('supabase_key') ?? '';
+  const url = withDefault(await store.get<string>('supabase_url'), 'supabase_url');
+  const key = withDefault(await store.get<string>('supabase_key'), 'supabase_key');
   return !!(url && key);
 }
 
@@ -115,8 +121,8 @@ export async function getSupabaseClient(): Promise<SupabaseClient<Database>> {
   if (supabaseInstance) return supabaseInstance;
 
   const store = await getStore();
-  const url = await store.get<string>('supabase_url') ?? '';
-  const key = await store.get<string>('supabase_key') ?? '';
+  const url = withDefault(await store.get<string>('supabase_url'), 'supabase_url');
+  const key = withDefault(await store.get<string>('supabase_key'), 'supabase_key');
 
   if (!url || !key) {
     throw new Error('Supabase nie jest skonfigurowany. Uzupełnij dane w Ustawieniach.');
@@ -235,6 +241,18 @@ export async function getConfigs(keys: string[]): Promise<Record<string, string>
     out[row.key] = row.value;
   }
   return out;
+}
+
+export async function setConfigs(settings: Record<string, string>): Promise<void> {
+  const entries = Object.entries(settings);
+  if (entries.length === 0) return;
+
+  const sb = await getSupabaseClient();
+  const payload = entries.map(([key, value]) => ({ key, value }));
+  const { error } = await (sb as SupabaseClient)
+    .from('settings' as never)
+    .upsert(payload as never, { onConflict: 'key' });
+  if (error) throw error;
 }
 
 export async function setConfig(key: string, value: string): Promise<void> {
