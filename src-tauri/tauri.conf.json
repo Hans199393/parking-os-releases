@@ -67,10 +67,6 @@
         "https://github.com/Hans199393/parking-os-releases/releases/latest/download/latest.json"
       ],
       "dialog": true
-    },
-    "autostart": {
-      "args": false,
-      "name": "Parking.OS"
     }
   }
 }
