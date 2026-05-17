@@ -43,6 +43,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "resources": {
       "../rtsp-proxy/server.js": "rtsp-proxy/server.js",
       "../rtsp-proxy/package.json": "rtsp-proxy/package.json",

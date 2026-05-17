@@ -92,6 +92,7 @@ export interface RadioPlayerApi {
 export function useRadioPlayer(enabled: boolean): RadioPlayerApi {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const currentStationRef = useRef<RadioStation | null>(null);
   const [ready, setReady] = useState(false);
   const [currentStation, setCurrentStation] = useState<RadioStation | null>(null);
   const [favorites, setFavorites] = useState<RadioStation[]>([]);
@@ -195,7 +196,12 @@ export function useRadioPlayer(enabled: boolean): RadioPlayerApi {
     audio.muted = muted;
   }, [muted, volume]);
 
+  useEffect(() => {
+    currentStationRef.current = currentStation;
+  }, [currentStation]);
+
   const selectStation = useCallback((station: RadioStation) => {
+    currentStationRef.current = station;
     setCurrentStation(station);
     setError(null);
   }, []);
@@ -209,7 +215,7 @@ export function useRadioPlayer(enabled: boolean): RadioPlayerApi {
     const audio = audioRef.current;
     if (!audio) return;
 
-    const shouldReuseSource = currentStation?.id === station.id && !!audio.currentSrc;
+    const shouldReuseSource = currentStationRef.current?.id === station.id && !!audio.currentSrc;
 
     selectStation(station);
     setPanelOpenState(true);
@@ -226,7 +232,7 @@ export function useRadioPlayer(enabled: boolean): RadioPlayerApi {
       setIsBuffering(false);
       setError(friendlyPlaybackError(playbackError));
     }
-  }, [attachSource, currentStation?.id, enabled, selectStation]);
+  }, [attachSource, enabled, selectStation]);
 
   const togglePlayback = useCallback(async () => {
     const audio = audioRef.current;
