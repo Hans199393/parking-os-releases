@@ -367,13 +367,6 @@ export default function Cameras({ cam1SnapshotUrl, cam1RtspUrl, cam1HlsUrl, cam2
 
   const anyConfigured = cameras.some(c => c.snapshotUrl || c.hlsUrl || c.rtspUrl);
   const needsProxy = cameras.some(c => c.hlsUrl || c.rtspUrl);
-  const missingRuntimeParts = cameraRuntime
-    ? [
-        !cameraRuntime.server_js_exists ? 'rtsp-proxy/server.js' : null,
-        !cameraRuntime.bundled_node_exists ? 'bin/node.exe' : null,
-        !cameraRuntime.bundled_ffmpeg_exists ? 'bin/ffmpeg.exe' : null,
-      ].filter((value): value is string => !!value)
-    : [];
 
   const loadCameraRuntime = useCallback(async () => {
     if (!needsProxy) {
@@ -462,31 +455,27 @@ export default function Cameras({ cam1SnapshotUrl, cam1RtspUrl, cam1HlsUrl, cam2
         )}
       </div>
 
-      {needsProxy && cameraRuntime?.issue && (
-        <div className="glass-strong border border-red-500/30 rounded-[var(--radius-lg)] p-4 flex-shrink-0 ring-1 ring-red-500/10">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <h3 className="text-red-300 font-semibold text-xs mb-1 uppercase tracking-wider">Diagnostyka proxy kamer</h3>
-              <p className="text-[var(--color-text)] text-sm">{cameraRuntime.issue}</p>
-              {missingRuntimeParts.length > 0 ? (
-                <p className="text-[var(--color-text-muted)] text-xs mt-1">
-                  Brakuje plików: <span className="font-mono text-red-200">{missingRuntimeParts.join(', ')}</span>
-                </p>
-              ) : (
-                <p className="text-[var(--color-text-muted)] text-xs mt-1">
-                  Sprawdź, czy port 8888 nie jest zajęty i uruchom aplikację ponownie po instalacji update.
-                </p>
-              )}
-            </div>
-
-            <button
-              onClick={() => void loadCameraRuntime()}
-              className="flex items-center gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs font-semibold bg-white/6 hover:bg-white/10 text-white border border-white/10 transition-colors"
-            >
-              <RefreshCw size={13} className={isCheckingRuntime ? 'animate-spin' : ''} />
-              Sprawdź ponownie
-            </button>
+      {needsProxy && (cameraRuntime?.issue || isCheckingRuntime) && (
+        <div className="glass-strong border border-amber-500/25 rounded-[var(--radius-md)] px-3 py-2.5 flex items-center justify-between gap-3 flex-shrink-0 ring-1 ring-amber-500/10">
+          <div className="min-w-0 flex items-center gap-2">
+            <span className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${isCheckingRuntime ? 'bg-amber-400 animate-pulse' : 'bg-red-400'}`} />
+            <p className="text-xs text-[var(--color-text)] truncate" title={cameraRuntime?.issue ?? 'Sprawdzanie proxy kamer...'}>
+              {isCheckingRuntime ? 'Sprawdzanie lokalnego proxy kamer...' : cameraRuntime?.issue}
+            </p>
+            {!isCheckingRuntime && (
+              <span className="hidden lg:inline text-[10px] text-[var(--color-text-muted)] flex-shrink-0">
+                Szczegóły i log: Ustawienia → Urządzenia
+              </span>
+            )}
           </div>
+
+          <button
+            onClick={() => void loadCameraRuntime()}
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-[var(--radius-md)] text-[11px] font-semibold bg-white/6 hover:bg-white/10 text-white border border-white/10 transition-colors flex-shrink-0"
+          >
+            <RefreshCw size={12} className={isCheckingRuntime ? 'animate-spin' : ''} />
+            Odśwież
+          </button>
         </div>
       )}
 

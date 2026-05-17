@@ -3,12 +3,29 @@
  * Visual: glass-strong, gradient-accent na ikonach, hero numbers dla parametrów.
  */
 
-import { Camera, Cpu, Zap, Eye, Activity, Lock } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { Camera, Cpu, Zap, Eye, Activity, Lock, RefreshCw, Play, RotateCcw, FileText, Copy, Server } from 'lucide-react';
 import { usePerm } from '../../lib/usePerm';
 
 interface Props {
   values: Record<string, string>;
   set: (key: string, val: string) => void;
+}
+
+interface CameraRuntimeStatus {
+  server_js_exists: boolean;
+  bundled_node_exists: boolean;
+  bundled_ffmpeg_exists: boolean;
+  proxy_process_running: boolean;
+  proxy_health_ok: boolean;
+  issue: string | null;
+}
+
+interface CameraProxyLog {
+  path: string;
+  exists: boolean;
+  tail: string;
 }
 
 const CAM_DEFAULTS = [
@@ -48,6 +65,13 @@ function Field({ label, value, onChange, placeholder, type = 'text' }: {
 export default function DevicesTab({ values, set }: Props) {
   const perm = usePerm();
   const canEdit = perm.has('settings.edit_devices');
+  const [proxyStatus, setProxyStatus] = useState<CameraRuntimeStatus | null>(null);
+  const [proxyLog, setProxyLog] = useState<CameraProxyLog | null>(null);
+  const [proxyError, setProxyError] = useState<string | null>(null);
+  const [showProxyLog, setShowProxyLog] = useState(false);
+  const [isRefreshingProxy, setIsRefreshingProxy] = useState(false);
+  const [proxyActionBusy, setProxyActionBusy] = useState<'start' | 'restart' | null>(null);
+  const [copiedLog, setCopiedLog] = useState(false);
   const setG = (k: string, v: string) => {
     if (!perm.guard('settings.edit_devices', 'edycja kamer/detektora')) return;
     set(k, v);
@@ -55,6 +79,65 @@ export default function DevicesTab({ values, set }: Props) {
   const bool = (k: string) => values[k] === 'true';
 
   const conf = parseFloat(values.detection_confidence ?? '0.5');
+  const rtspConfiguredCount = CAM_DEFAULTS.filter(cam => !!values[`${cam.id}_rtsp_url`]?.trim()).length;
+
+  const refreshProxyState = useCallback(async (showSpinner = true) => {
+    if (showSpinner) setIsRefreshingProxy(true);
+    try {
+      const [status, log] = await Promise.all([
+        invoke<CameraRuntimeStatus>('camera_runtime_status'),
+        invoke<CameraProxyLog>('camera_proxy_read_log'),
+      ]);
+      setProxyStatus(status);
+      setProxyLog(log);
+      setProxyError(null);
+    } catch (error) {
+      setProxyError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (showSpinner) setIsRefreshingProxy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshProxyState();
+  }, [refreshProxyState]);
+
+  const runProxyAction = useCallback(async (action: 'camera_proxy_start' | 'camera_proxy_restart', kind: 'start' | 'restart') => {
+    setProxyActionBusy(kind);
+    setProxyError(null);
+    try {
+      await invoke(action);
+    } catch (error) {
+      setProxyError(error instanceof Error ? error.message : String(error));
+    } finally {
+      await new Promise(resolve => setTimeout(resolve, 900));
+      await refreshProxyState(false);
+      setProxyActionBusy(null);
+    }
+  }, [refreshProxyState]);
+
+  const copyProxyLog = useCallback(async () => {
+    if (!proxyLog) return;
+    try {
+      await navigator.clipboard.writeText(`Plik: ${proxyLog.path}\n\n${proxyLog.tail}`.trim());
+      setCopiedLog(true);
+      setTimeout(() => setCopiedLog(false), 1800);
+    } catch (error) {
+      setProxyError(error instanceof Error ? error.message : String(error));
+    }
+  }, [proxyLog]);
+
+  const proxyStateLabel = proxyStatus?.proxy_health_ok
+    ? 'Działa'
+    : proxyStatus?.proxy_process_running
+      ? 'Startuje / zawiesił się'
+      : 'Nie działa';
+
+  const proxyStateTone = proxyStatus?.proxy_health_ok
+    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+    : proxyStatus?.proxy_process_running
+      ? 'bg-amber-500/15 text-amber-300 border-amber-500/40'
+      : 'bg-red-500/15 text-red-300 border-red-500/40';
 
   return <>
     {!canEdit && (
@@ -110,6 +193,101 @@ export default function DevicesTab({ values, set }: Props) {
           </div>
         );
       })}
+    </div>
+
+    {/* ─── Proxy kamer ─── */}
+    <div className="glass-strong rounded-[var(--radius-lg)] p-6 mt-5 animate-slideUp" style={{ animationDelay: '225ms' }}>
+      <div className="flex flex-wrap items-start justify-between gap-3 mb-5">
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-11 h-11 rounded-[var(--radius-md)] bg-gradient-accent flex items-center justify-center shadow-[var(--shadow-md)] flex-shrink-0">
+            <Server size={22} className="text-[#1a1410]" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-lg font-bold text-[var(--color-text)]">Lokalny proxy RTSP → HLS</h3>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              localhost:8888 · RTSP skonfigurowane: {rtspConfiguredCount}/4 · log zapisuje się do pliku
+            </p>
+          </div>
+        </div>
+        <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full border ${proxyStateTone}`}>
+          {isRefreshingProxy ? '● sprawdzanie' : `● ${proxyStateLabel}`}
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+        {[
+          { label: 'server.js', ok: !!proxyStatus?.server_js_exists },
+          { label: 'node runtime', ok: !!proxyStatus?.bundled_node_exists },
+          { label: 'ffmpeg runtime', ok: !!proxyStatus?.bundled_ffmpeg_exists },
+        ].map(item => (
+          <div key={item.label} className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-black/15 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--color-text-muted)]">{item.label}</span>
+              <span className={`text-[10px] font-bold ${item.ok ? 'text-emerald-300' : 'text-red-300'}`}>{item.ok ? 'OK' : 'BRAK'}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-[var(--radius-md)] border border-[var(--color-border)] bg-black/15 px-4 py-3 mb-4">
+        <p className="text-sm text-[var(--color-text)] leading-relaxed">
+          {proxyError ?? proxyStatus?.issue ?? 'Proxy odpowiada prawidłowo na http://localhost:8888/.'}
+        </p>
+        {proxyLog?.path && (
+          <p className="text-[11px] text-[var(--color-text-muted)] mt-2 break-all">
+            Plik logu: <span className="font-mono text-[var(--color-text)]">{proxyLog.path}</span>
+          </p>
+        )}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => void refreshProxyState()}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs font-semibold bg-white/6 hover:bg-white/10 text-white border border-white/10 transition-colors"
+          disabled={isRefreshingProxy || !!proxyActionBusy}
+        >
+          <RefreshCw size={13} className={isRefreshingProxy ? 'animate-spin' : ''} />
+          Odśwież status
+        </button>
+        <button
+          onClick={() => void runProxyAction('camera_proxy_start', 'start')}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs font-semibold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-200 border border-emerald-500/30 transition-colors"
+          disabled={!!proxyActionBusy}
+        >
+          <Play size={13} className={proxyActionBusy === 'start' ? 'animate-pulse' : ''} />
+          Włącz proxy
+        </button>
+        <button
+          onClick={() => void runProxyAction('camera_proxy_restart', 'restart')}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs font-semibold bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 border border-amber-500/30 transition-colors"
+          disabled={!!proxyActionBusy}
+        >
+          <RotateCcw size={13} className={proxyActionBusy === 'restart' ? 'animate-spin' : ''} />
+          Restart proxy
+        </button>
+        <button
+          onClick={() => setShowProxyLog(v => !v)}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs font-semibold bg-white/6 hover:bg-white/10 text-white border border-white/10 transition-colors"
+        >
+          <FileText size={13} />
+          {showProxyLog ? 'Ukryj log' : 'Pokaż log'}
+        </button>
+        <button
+          onClick={() => void copyProxyLog()}
+          className="inline-flex items-center gap-2 px-3 py-2 rounded-[var(--radius-md)] text-xs font-semibold bg-white/6 hover:bg-white/10 text-white border border-white/10 transition-colors"
+          disabled={!proxyLog}
+        >
+          <Copy size={13} />
+          {copiedLog ? 'Skopiowano' : 'Kopiuj log'}
+        </button>
+      </div>
+
+      {showProxyLog && (
+        <div className="mt-4 pt-4 border-t border-[var(--color-border)]/40">
+          <p className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--color-text-muted)] mb-2">Ostatnie wpisy logu proxy</p>
+          <pre className="max-h-64 overflow-auto rounded-[var(--radius-md)] border border-[var(--color-border)] bg-black/30 px-3 py-3 text-[11px] leading-relaxed text-[var(--color-text)] whitespace-pre-wrap break-all">{proxyLog?.tail || 'Brak wpisów w logu proxy.'}</pre>
+        </div>
+      )}
     </div>
 
     {/* ─── Opcje podglądu ─── */}

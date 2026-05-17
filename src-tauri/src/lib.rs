@@ -8,8 +8,11 @@ use mailparse::MailHeaderMap;
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::fs::OpenOptions;
+use std::io::Write;
 
 const DEV_FFMPEG_PATH: &str = r"G:\parking_2026\ffmpeg-8.1-essentials_build\bin\ffmpeg.exe";
+const CAMERA_PROXY_LOG_FILE: &str = "camera-proxy.log";
 
 struct ProxyRuntimePaths {
     proxy_dir: PathBuf,
@@ -101,6 +104,166 @@ fn read_setting_string(settings: &Value, key: &str) -> String {
             _ => None,
         })
         .unwrap_or_default()
+}
+
+fn proxy_log_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&app_data_dir).map_err(|e| e.to_string())?;
+    Ok(app_data_dir.join(CAMERA_PROXY_LOG_FILE))
+}
+
+fn proxy_log_timestamp() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .to_string()
+}
+
+fn append_proxy_log(app: &AppHandle, message: &str) {
+    let Ok(log_path) = proxy_log_path(app) else {
+        return;
+    };
+
+    if let Ok(metadata) = std::fs::metadata(&log_path) {
+        if metadata.len() > 1_000_000 {
+            let _ = std::fs::write(&log_path, "");
+        }
+    }
+
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+        let _ = writeln!(file, "[{}] {}", proxy_log_timestamp(), message);
+    }
+}
+
+fn read_proxy_log_tail(app: &AppHandle, max_lines: usize) -> Result<String, String> {
+    let log_path = proxy_log_path(app)?;
+    if !log_path.exists() {
+        return Ok(String::new());
+    }
+
+    let raw = std::fs::read_to_string(&log_path).map_err(|e| e.to_string())?;
+    let lines: Vec<&str> = raw.lines().collect();
+    let start = lines.len().saturating_sub(max_lines);
+    Ok(lines[start..].join("\n"))
+}
+
+fn kill_proxy_child(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = child.kill();
+    }
+
+    let _ = child.wait();
+}
+
+fn build_proxy_command(app: &AppHandle) -> Result<std::process::Command, String> {
+    let runtime = resolve_proxy_runtime_paths(app);
+    if !runtime.server_js_exists || !runtime.bundled_node_exists || !runtime.bundled_ffmpeg_exists {
+        return Err("Brakuje lokalnego runtime kamer. Ten komputer potrzebuje pełnego update z pakietem Node.js, ffmpeg i RTSP proxy.".into());
+    }
+
+    let settings = read_settings_json(app);
+    let cam1_rtsp = read_setting_string(&settings, "cam1_rtsp_url");
+    let cam2_rtsp = read_setting_string(&settings, "cam2_rtsp_url");
+    let cam3_rtsp = read_setting_string(&settings, "cam3_rtsp_url");
+    let cam4_rtsp = read_setting_string(&settings, "cam4_rtsp_url");
+
+    let log_path = proxy_log_path(app)?;
+    if let Ok(metadata) = std::fs::metadata(&log_path) {
+        if metadata.len() > 1_000_000 {
+            let _ = std::fs::write(&log_path, "");
+        }
+    }
+
+    let mut log_header = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| format!("Nie można otworzyć logu proxy: {}", e))?;
+    writeln!(log_header, "\n===== {} proxy start =====", proxy_log_timestamp())
+        .map_err(|e| format!("Nie można zapisać logu proxy: {}", e))?;
+
+    let stdout_log = log_header
+        .try_clone()
+        .map_err(|e| format!("Nie można sklonować logu proxy: {}", e))?;
+    let stderr_log = log_header
+        .try_clone()
+        .map_err(|e| format!("Nie można sklonować logu proxy: {}", e))?;
+
+    append_proxy_log(
+        app,
+        &format!(
+            "[proxy] start node={} ffmpeg={} server={}",
+            runtime.node_cmd,
+            runtime.ffmpeg_path,
+            runtime.server_js.display()
+        ),
+    );
+
+    let mut cmd = std::process::Command::new(&runtime.node_cmd);
+    cmd.arg(&runtime.server_js)
+        .current_dir(&runtime.proxy_dir)
+        .env("FFMPEG_PATH", &runtime.ffmpeg_path)
+        .stdout(std::process::Stdio::from(stdout_log))
+        .stderr(std::process::Stdio::from(stderr_log));
+
+    if !cam1_rtsp.trim().is_empty() {
+        cmd.env("CAM1_RTSP", cam1_rtsp);
+    }
+    if !cam2_rtsp.trim().is_empty() {
+        cmd.env("CAM2_RTSP", cam2_rtsp);
+    }
+    if !cam3_rtsp.trim().is_empty() {
+        cmd.env("CAM3_RTSP", cam3_rtsp);
+    }
+    if !cam4_rtsp.trim().is_empty() {
+        cmd.env("CAM4_RTSP", cam4_rtsp);
+    }
+
+    Ok(cmd)
+}
+
+fn start_proxy_process(app: &AppHandle, process: &ProxyProcess, force_restart: bool) -> Result<(), String> {
+    let mut guard = process.0.lock().map_err(|e| e.to_string())?;
+
+    let already_running = if let Some(child) = guard.as_mut() {
+        matches!(child.try_wait(), Ok(None))
+    } else {
+        false
+    };
+
+    if already_running && !force_restart {
+        append_proxy_log(app, "[proxy] Start pominięty — proces już działa.");
+        return Ok(());
+    }
+
+    if let Some(mut child) = guard.take() {
+        append_proxy_log(app, "[proxy] Zatrzymywanie poprzedniej instancji...");
+        kill_proxy_child(&mut child);
+    }
+
+    let mut cmd = build_proxy_command(app)?;
+    match cmd.spawn() {
+        Ok(child) => {
+            *guard = Some(child);
+            append_proxy_log(app, "[proxy] Proces node uruchomiony.");
+            Ok(())
+        }
+        Err(e) => {
+            append_proxy_log(app, &format!("[proxy] Nie można uruchomić node: {}", e));
+            Err(format!("Nie można uruchomić lokalnego proxy kamer: {}", e))
+        }
+    }
 }
 
 // ─── Email types ─────────────────────────────────────────────────────────────
@@ -592,8 +755,7 @@ impl Drop for ProxyProcess {
     fn drop(&mut self) {
         if let Ok(mut guard) = self.0.lock() {
             if let Some(mut child) = guard.take() {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_proxy_child(&mut child);
             }
         }
     }
@@ -741,9 +903,9 @@ async fn camera_runtime_status(
     } else if !server_js_exists || !bundled_node_exists || !bundled_ffmpeg_exists {
         Some("Brakuje lokalnego runtime kamer. Ten komputer potrzebuje pełnego update z pakietem Node.js, ffmpeg i RTSP proxy.".to_string())
     } else if !proxy_process_running {
-        Some("Lokalny proxy kamer nie wystartował po uruchomieniu aplikacji.".to_string())
+        Some("Lokalny proxy kamer nie wystartował. Wejdź w Ustawienia → Urządzenia i użyj Włącz proxy albo Restart proxy.".to_string())
     } else {
-        Some("Lokalny proxy kamer działa nieprawidłowo albo nie odpowiada na http://localhost:8888/.".to_string())
+        Some("Lokalny proxy kamer nie odpowiada poprawnie na http://localhost:8888/. Szczegóły są w logu proxy w Ustawienia → Urządzenia.".to_string())
     };
 
     Ok(CameraRuntimeStatus {
@@ -788,6 +950,41 @@ pub struct CameraRuntimeStatus {
     pub proxy_process_running: bool,
     pub proxy_health_ok: bool,
     pub issue: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct CameraProxyLog {
+    pub path: String,
+    pub exists: bool,
+    pub tail: String,
+}
+
+#[tauri::command]
+fn camera_proxy_start(app: AppHandle, state: tauri::State<'_, ProxyProcess>) -> Result<(), String> {
+    start_proxy_process(&app, &state, false)
+}
+
+#[tauri::command]
+fn camera_proxy_restart(app: AppHandle, state: tauri::State<'_, ProxyProcess>) -> Result<(), String> {
+    append_proxy_log(&app, "[proxy] Wymuszony restart z panelu ustawień.");
+    start_proxy_process(&app, &state, true)
+}
+
+#[tauri::command]
+fn camera_proxy_read_log(app: AppHandle) -> Result<CameraProxyLog, String> {
+    let log_path = proxy_log_path(&app)?;
+    let exists = log_path.exists();
+    let tail = if exists {
+        read_proxy_log_tail(&app, 120)?
+    } else {
+        String::new()
+    };
+
+    Ok(CameraProxyLog {
+        path: log_path.to_string_lossy().to_string(),
+        exists,
+        tail,
+    })
 }
 
 /// Zwraca bajty pliku SQLite jako base64 — do uploadowania przez JS do Supabase Storage.
@@ -974,38 +1171,10 @@ pub fn run() {
                 }
             }
             // ── Auto-start RTSP→HLS proxy ──────────────────────────────────
-            let runtime = resolve_proxy_runtime_paths(&app_handle);
-            if runtime.server_js_exists {
-                let settings = read_settings_json(&app_handle);
-                let cam1_rtsp = read_setting_string(&settings, "cam1_rtsp_url");
-                let cam2_rtsp = read_setting_string(&settings, "cam2_rtsp_url");
-                let cam3_rtsp = read_setting_string(&settings, "cam3_rtsp_url");
-                let cam4_rtsp = read_setting_string(&settings, "cam4_rtsp_url");
-                let mut cmd = std::process::Command::new(&runtime.node_cmd);
-                cmd.arg(&runtime.server_js)
-                    .current_dir(&runtime.proxy_dir)
-                    .env("FFMPEG_PATH", &runtime.ffmpeg_path)
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null());
-                if !cam1_rtsp.trim().is_empty() {
-                    cmd.env("CAM1_RTSP", cam1_rtsp);
-                }
-                if !cam2_rtsp.trim().is_empty() {
-                    cmd.env("CAM2_RTSP", cam2_rtsp);
-                }
-                if !cam3_rtsp.trim().is_empty() {
-                    cmd.env("CAM3_RTSP", cam3_rtsp);
-                }
-                if !cam4_rtsp.trim().is_empty() {
-                    cmd.env("CAM4_RTSP", cam4_rtsp);
-                }
-                match cmd.spawn() {
-                    Ok(child) => {
-                        if let Some(state) = app.try_state::<ProxyProcess>() {
-                            *state.0.lock().unwrap() = Some(child);
-                        }
-                    }
-                    Err(e) => eprintln!("[proxy] Nie można uruchomić node: {}", e),
+            if let Some(state) = app.try_state::<ProxyProcess>() {
+                if let Err(e) = start_proxy_process(&app_handle, &state, false) {
+                    append_proxy_log(&app_handle, &format!("[proxy] Autostart nieudany: {}", e));
+                    eprintln!("[proxy] Autostart nieudany: {}", e);
                 }
             }
             Ok(())
@@ -1023,6 +1192,9 @@ pub fn run() {
             send_notification,
             fetch_snapshot,
             camera_runtime_status,
+            camera_proxy_start,
+            camera_proxy_restart,
+            camera_proxy_read_log,
             spawn_pwa,
             stop_pwa,
             spawn_detector,

@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Wersja (np. v2026.1.3)'
+        description: 'Wersja (np. v2026.1.4)'
         required: true
-        default: 'v2026.1.3'
+        default: 'v2026.1.4'
 
 jobs:
   release:
@@ -51,15 +51,20 @@ jobs:
         id: artifacts
         shell: pwsh
         run: |
-          $nsis = Get-ChildItem "parking_os\src-tauri\target\release\bundle\nsis\*-setup.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          $msi  = Get-ChildItem "parking_os\src-tauri\target\release\bundle\msi\*.msi"         -ErrorAction SilentlyContinue | Select-Object -First 1
-          $nsig = Get-ChildItem "parking_os\src-tauri\target\release\bundle\nsis\*.sig"        -ErrorAction SilentlyContinue | Select-Object -First 1
-          $msig = Get-ChildItem "parking_os\src-tauri\target\release\bundle\msi\*.sig"         -ErrorAction SilentlyContinue | Select-Object -First 1
+          $nsis = Get-ChildItem "parking_os\src-tauri\target\release\bundle\nsis\*-setup.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $nzip = Get-ChildItem "parking_os\src-tauri\target\release\bundle\nsis\*-setup.nsis.zip" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $msi  = Get-ChildItem "parking_os\src-tauri\target\release\bundle\msi\*.msi" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $nsig = Get-ChildItem "parking_os\src-tauri\target\release\bundle\nsis\*-setup.exe.sig" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $zsig = Get-ChildItem "parking_os\src-tauri\target\release\bundle\nsis\*-setup.nsis.zip.sig" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $msig = Get-ChildItem "parking_os\src-tauri\target\release\bundle\msi\*.msi.sig" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           echo "NSIS: $($nsis?.FullName)"
+          echo "NSIS ZIP: $($nzip?.FullName)"
           echo "MSI:  $($msi?.FullName)"
           echo "nsis_path=$($nsis?.FullName)" >> $env:GITHUB_OUTPUT
+          echo "nzip_path=$($nzip?.FullName)" >> $env:GITHUB_OUTPUT
           echo "msi_path=$($msi?.FullName)"   >> $env:GITHUB_OUTPUT
           echo "nsig_path=$($nsig?.FullName)" >> $env:GITHUB_OUTPUT
+          echo "zsig_path=$($zsig?.FullName)" >> $env:GITHUB_OUTPUT
           echo "msig_path=$($msig?.FullName)" >> $env:GITHUB_OUTPUT
 
       - name: Generate latest.json for updater
@@ -70,8 +75,10 @@ jobs:
           if (-not $tag) { $tag = "${{ inputs.tag }}" }
           $version = $tag -replace '^v', ''
           $nsisName = Split-Path "${{ steps.artifacts.outputs.nsis_path }}" -Leaf
+          $nzipName = Split-Path "${{ steps.artifacts.outputs.nzip_path }}" -Leaf
           $msiName  = Split-Path "${{ steps.artifacts.outputs.msi_path }}" -Leaf
           $nsigContent = Get-Content "${{ steps.artifacts.outputs.nsig_path }}" -Raw
+          $zsigContent = Get-Content "${{ steps.artifacts.outputs.zsig_path }}" -Raw
           $msigContent = Get-Content "${{ steps.artifacts.outputs.msig_path }}" -Raw
           $repo = "${{ github.repository }}"
           $now  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
@@ -81,6 +88,10 @@ jobs:
             notes    = "Parking.OS $version"
             pub_date = $now
             platforms = @{
+              "windows-x86_64-nsis" = @{
+                signature = $zsigContent.Trim()
+                url       = "https://github.com/$repo/releases/download/$tag/$nzipName"
+              }
               "windows-x86_64" = @{
                 signature = $nsigContent.Trim()
                 url       = "https://github.com/$repo/releases/download/$tag/$nsisName"
@@ -112,8 +123,10 @@ jobs:
           prerelease: false
           files: |
             ${{ steps.artifacts.outputs.nsis_path }}
+            ${{ steps.artifacts.outputs.nzip_path }}
             ${{ steps.artifacts.outputs.msi_path }}
             ${{ steps.artifacts.outputs.nsig_path }}
+            ${{ steps.artifacts.outputs.zsig_path }}
             ${{ steps.artifacts.outputs.msig_path }}
             latest.json
           overwrite_files: true
