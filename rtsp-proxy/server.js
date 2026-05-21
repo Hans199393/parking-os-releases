@@ -1,5 +1,5 @@
 // RTSP to HLS proxy using Node.js and ffmpeg
-// 1. Instalacja: npm install
+// 1. Brak zewnętrznych zależności npm
 // 2. Skonfiguruj kamery w pliku .env
 // 3. Uruchom: node server.js
 // 4. W Parking.OS wpisz HLS URL: http://localhost:8888/stream/cam1.m3u8
@@ -18,7 +18,6 @@ if (require('fs').existsSync(envPath)) {
   });
 }
 
-const express = require('express');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -128,33 +127,150 @@ async function startMediamtx() {
 }
 // ─────────────────────────────────────────────────────────────────────────────
 
-const app = express();
+function applyCors(res) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
 
-// CORS for local dev
-app.use((_req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  next();
-});
-app.use(express.json());
+function sendJson(res, statusCode, payload) {
+  applyCors(res);
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.end(JSON.stringify(payload));
+}
 
-// Serve HLS files
-app.use('/stream', express.static(HLS_DIR, {
-  setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.m3u8')) res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
-    if (filePath.endsWith('.ts')) res.setHeader('Content-Type', 'video/mp2t');
+function sendText(res, statusCode, message) {
+  applyCors(res);
+  res.statusCode = statusCode;
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.end(message);
+}
+
+function sendEmpty(res, statusCode) {
+  applyCors(res);
+  res.statusCode = statusCode;
+  res.end();
+}
+
+function parseJsonBody(req) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    let done = false;
+
+    const finish = (callback, value) => {
+      if (done) return;
+      done = true;
+      callback(value);
+    };
+
+    req.on('data', chunk => {
+      if (done) return;
+      raw += chunk;
+      if (raw.length > 1_000_000) {
+        finish(reject, new Error('Request body too large'));
+        req.destroy();
+      }
+    });
+
+    req.on('end', () => {
+      if (done) return;
+      if (!raw.trim()) {
+        finish(resolve, {});
+        return;
+      }
+
+      try {
+        finish(resolve, JSON.parse(raw));
+      } catch {
+        finish(reject, new Error('Nieprawidlowy JSON'));
+      }
+    });
+
+    req.on('error', error => {
+      finish(reject, error);
+    });
+  });
+}
+
+function normalizeStreamFile(requestPath) {
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(requestPath);
+  } catch {
+    return null;
   }
-}));
 
-// Health check
-app.get('/', (_req, res) => {
-  res.json({
+  const normalized = path.normalize(decodedPath).replace(/^([/\\])+/, '');
+  if (!normalized || normalized.startsWith('..') || path.isAbsolute(normalized)) {
+    return null;
+  }
+
+  return path.join(HLS_DIR, normalized);
+}
+
+function serveStreamFile(req, res, pathname) {
+  if (!pathname.startsWith('/stream/')) {
+    return false;
+  }
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    sendJson(res, 405, { error: 'Metoda niedozwolona' });
+    return true;
+  }
+
+  const filePath = normalizeStreamFile(pathname.slice('/stream/'.length));
+  if (!filePath) {
+    sendText(res, 400, 'Nieprawidlowa sciezka pliku');
+    return true;
+  }
+
+  let stat;
+  try {
+    stat = fs.statSync(filePath);
+  } catch {
+    sendText(res, 404, 'Plik HLS nie istnieje');
+    return true;
+  }
+
+  if (!stat.isFile()) {
+    sendText(res, 404, 'Plik HLS nie istnieje');
+    return true;
+  }
+
+  applyCors(res);
+  if (filePath.endsWith('.m3u8')) res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
+  if (filePath.endsWith('.ts')) res.setHeader('Content-Type', 'video/mp2t');
+  res.setHeader('Content-Length', stat.size);
+  res.statusCode = 200;
+
+  if (req.method === 'HEAD') {
+    res.end();
+    return true;
+  }
+
+  const stream = fs.createReadStream(filePath);
+  stream.on('error', () => {
+    if (!res.headersSent) {
+      sendText(res, 500, 'Blad odczytu pliku HLS');
+      return;
+    }
+
+    res.destroy();
+  });
+  stream.pipe(res);
+  return true;
+}
+
+function buildHealthPayload() {
+  return {
     status: 'running',
     cameras: cameras.map(c => ({
       id: c.id,
       hls: `http://localhost:${PORT}/stream/${c.id}.m3u8`
     }))
-  });
-});
+  };
+}
 
 // ─── ONVIF PTZ ─────────────────────────────────────────────────────────────
 function extractIp(rtspUrl) {
@@ -245,13 +361,27 @@ async function getProfileToken(camId, cfg) {
   return 'Profile_1';
 }
 
-app.post('/ptz/:camId', async (req, res) => {
-  const { camId } = req.params;
-  const { action, x = 0, y = 0, z = 0 } = req.body || {};
+async function handlePtzRequest(camId, req, res) {
+  if (req.method !== 'POST') {
+    sendJson(res, 405, { error: 'Metoda niedozwolona' });
+    return;
+  }
+
+  let body;
+  try {
+    body = await parseJsonBody(req);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    sendJson(res, 400, { error: message });
+    return;
+  }
+
+  const { action, x = 0, y = 0, z = 0 } = body || {};
   const cfg = ptzConfig[camId];
 
   if (!cfg || !cfg.ip) {
-    return res.status(404).json({ error: `PTZ nie skonfigurowane dla ${camId}` });
+    sendJson(res, 404, { error: `PTZ nie skonfigurowane dla ${camId}` });
+    return;
   }
 
   console.log(`[ptz] ${camId} action=${action} ip=${cfg.ip}`);
@@ -263,42 +393,75 @@ app.post('/ptz/:camId', async (req, res) => {
     if (action === 'stop') {
       bodyXml = `<tptz:Stop><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:PanTilt>true</tptz:PanTilt><tptz:Zoom>true</tptz:Zoom></tptz:Stop>`;
       await onvifPost(cfg.ip, cfg.port, ONVIF_PTZ_PATH, bodyXml);
-      return res.json({ ok: true });
+      sendJson(res, 200, { ok: true });
+      return;
     } else if (action === 'move') {
       // ContinuousMove + server-side auto-stop after 500ms
       // Cheap cameras (YCC365Plus) ignore ONVIF Stop — auto-stop ensures short controlled movement
       const MOVE_DURATION_MS = parseInt(process.env.PTZ_MOVE_DURATION_MS || '500');
       bodyXml = `<tptz:ContinuousMove><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:Velocity><tt:PanTilt x="${x}" y="${y}"/><tt:Zoom x="${z}"/></tptz:Velocity></tptz:ContinuousMove>`;
       await onvifPost(cfg.ip, cfg.port, ONVIF_PTZ_PATH, bodyXml);
-      res.json({ ok: true });
+      sendJson(res, 200, { ok: true });
       // auto-stop (non-blocking — response already sent)
       setTimeout(async () => {
         try {
           const stopXml = `<tptz:Stop><tptz:ProfileToken>${token}</tptz:ProfileToken><tptz:PanTilt>true</tptz:PanTilt><tptz:Zoom>true</tptz:Zoom></tptz:Stop>`;
           await onvifPost(cfg.ip, cfg.port, ONVIF_PTZ_PATH, stopXml);
-        } catch (e) { console.error(`[ptz] auto-stop error:`, e.message); }
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          console.error(`[ptz] auto-stop error:`, message);
+        }
       }, MOVE_DURATION_MS);
       return;
     } else if (action === 'home') {
       bodyXml = `<tptz:GotoHomePosition><tptz:ProfileToken>${token}</tptz:ProfileToken></tptz:GotoHomePosition>`;
     } else {
-      return res.status(400).json({ error: 'Nieznana akcja PTZ' });
+      sendJson(res, 400, { error: 'Nieznana akcja PTZ' });
+      return;
     }
 
     await onvifPost(cfg.ip, cfg.port, ONVIF_PTZ_PATH, bodyXml);
-    res.json({ ok: true });
+    sendJson(res, 200, { ok: true });
   } catch (err) {
-    console.error(`[ptz] ${camId} error:`, err.message);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[ptz] ${camId} error:`, message);
     // SOAP faults (HTTP 4xx/5xx from camera) are non-fatal — camera likely processed the command.
     // Only return HTTP 500 for real network errors (timeout, connection refused).
-    const isNetworkError = /timeout|ECONNREFUSED|ECONNRESET|EHOSTUNREACH/i.test(err.message);
+    const isNetworkError = /timeout|ECONNREFUSED|ECONNRESET|EHOSTUNREACH/i.test(message);
     if (isNetworkError) {
-      res.status(500).json({ error: err.message });
+      sendJson(res, 500, { error: message });
     } else {
-      res.json({ ok: true, warning: err.message });
+      sendJson(res, 200, { ok: true, warning: message });
     }
   }
-});
+}
+
+async function handleHttpRequest(req, res) {
+  const requestUrl = new URL(req.url || '/', `http://127.0.0.1:${PORT}`);
+  const pathname = requestUrl.pathname;
+
+  if (req.method === 'OPTIONS') {
+    sendEmpty(res, 204);
+    return;
+  }
+
+  if (pathname === '/' && req.method === 'GET') {
+    sendJson(res, 200, buildHealthPayload());
+    return;
+  }
+
+  if (serveStreamFile(req, res, pathname)) {
+    return;
+  }
+
+  const ptzMatch = pathname.match(/^\/ptz\/([^/]+)$/);
+  if (ptzMatch) {
+    await handlePtzRequest(ptzMatch[1], req, res);
+    return;
+  }
+
+  sendJson(res, 404, { error: 'Nie znaleziono endpointu' });
+}
 // ─────────────────────────────────────────────────────────────────────────────
 
 function startCamera(cam) {
@@ -387,7 +550,20 @@ async function main() {
   // Start mediamtx first (if available) — gives it 2s to connect before ffmpeg starts
   await startMediamtx();
 
-  const server = app.listen(PORT, () => {
+  const server = http.createServer((req, res) => {
+    handleHttpRequest(req, res).catch(err => {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[server] HTTP error:', message);
+      if (res.headersSent || res.writableEnded) {
+        res.destroy();
+        return;
+      }
+
+      sendJson(res, 500, { error: 'Internal server error' });
+    });
+  });
+
+  server.listen(PORT, () => {
     console.log(`HLS proxy nasłuchuje na http://localhost:${PORT}`);
     console.log('Dostępne streamy:');
     cameras.forEach(cam => {
