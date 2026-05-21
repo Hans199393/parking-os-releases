@@ -21,10 +21,13 @@
   - `src-tauri/tauri.conf.json`
   - `.github/workflows/release.yml`
   - `README.md`
+  - `.gitignore`
+  - `src/components/Logs/Logs.tsx`
 - Proxy zostal przepisany z `express` na wbudowany serwer `http` z Node.js.
 - Endpointy `GET /`, `GET/HEAD /stream/*`, `POST /ptz/:camId` i obsluga CORS/JSON dzialaja bez paczek npm.
 - Z bundla Tauri usunieto zasoby `rtsp-proxy/package.json` i `rtsp-proxy/node_modules/**/*`, bo updater na Windows potrafil rozkladac te pliki w runtime w sposob niezgodny z oczekiwaniami Node.
 - Fix usuwa blad runtime `Cannot find module 'body-parser'`, ktory blokowal autostart kamer po aktualizacji.
+- Release workflow wymagal dodatkowo wlaczenia do repo pliku `src/components/Logs/Logs.tsx`, bo byl przypadkowo lapany przez wpis `logs` w `.gitignore`; bez tego GitHub Actions nie mogl zbudowac aplikacji dla `v2026.1.6`.
 
 ## Migracja i zgodność
 
