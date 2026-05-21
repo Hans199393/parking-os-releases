@@ -24,7 +24,7 @@ tauri-plugin-updater = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 bcrypt = "0.16"
-reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "native-tls"] }
 base64 = "0.22"
 tokio = { version = "1", features = ["time"] }
 imap = "2.4"

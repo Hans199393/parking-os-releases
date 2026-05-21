@@ -1,49 +1,139 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import { spawn, type ChildProcess } from "child_process";
+import { spawn, spawnSync, type ChildProcess } from "child_process";
 import { resolve } from "path";
 import type { Plugin } from "vite";
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
 
+type ProxyHealthPayload = {
+  status?: string;
+  cameras?: Array<{ id: string; hls?: string }>;
+};
+
 /** Vite plugin that auto-starts the rtsp-proxy HLS server alongside dev. */
 function hlsProxyPlugin(): Plugin {
   let proxyProcess: ChildProcess | null = null;
+  let cleanupRegistered = false;
+
+  const stopProxy = () => {
+    if (!proxyProcess?.pid) {
+      proxyProcess = null;
+      return;
+    }
+
+    if (process.platform === "win32") {
+      spawnSync("taskkill", ["/PID", String(proxyProcess.pid), "/T", "/F"], {
+        stdio: "ignore",
+      });
+    } else {
+      proxyProcess.kill("SIGTERM");
+    }
+
+    proxyProcess = null;
+  };
+
+  const registerCleanup = () => {
+    if (cleanupRegistered) return;
+    cleanupRegistered = true;
+
+    const cleanup = () => stopProxy();
+    process.once("exit", cleanup);
+    process.once("beforeExit", cleanup);
+    process.once("SIGINT", cleanup);
+    process.once("SIGTERM", cleanup);
+  };
+
+  const fetchWithTimeout = async (url: string) => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 1200);
+    try {
+      return await fetch(url, { signal: controller.signal });
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const probeExistingProxy = async (): Promise<"none" | "ready" | "occupied"> => {
+    try {
+      const rootResponse = await fetchWithTimeout("http://127.0.0.1:8888/");
+      if (!rootResponse.ok) {
+        return "occupied";
+      }
+
+      const payload = (await rootResponse.json()) as ProxyHealthPayload;
+      if (payload.status !== "running" || !Array.isArray(payload.cameras) || payload.cameras.length === 0) {
+        return "occupied";
+      }
+
+      for (const camera of payload.cameras) {
+        const manifestUrl = (camera.hls || `http://127.0.0.1:8888/stream/${camera.id}.m3u8`).replace(
+          "localhost",
+          "127.0.0.1"
+        );
+        const manifestResponse = await fetchWithTimeout(manifestUrl);
+        if (!manifestResponse.ok) {
+          return "occupied";
+        }
+      }
+
+      return "ready";
+    } catch {
+      return "none";
+    }
+  };
+
   return {
     name: "hls-proxy",
+    apply: "serve",
     configureServer() {
       const proxyDir = resolve(__dirname, "rtsp-proxy");
       const serverFile = resolve(proxyDir, "server.js");
-      try {
-        proxyProcess = spawn("node", [serverFile], {
-          cwd: proxyDir,
-          stdio: ["ignore", "pipe", "pipe"],
-          shell: false,
-        });
-        proxyProcess.stdout?.on("data", (d: Buffer) =>
-          console.log(`[hls-proxy] ${d.toString().trim()}`)
-        );
-        proxyProcess.stderr?.on("data", (d: Buffer) =>
-          console.error(`[hls-proxy] ${d.toString().trim()}`)
-        );
-        proxyProcess.on("error", (err) =>
-          console.error(`[hls-proxy] spawn error: ${err.message}`)
-        );
-        proxyProcess.on("close", (code) =>
-          console.log(`[hls-proxy] exited (code ${code})`)
-        );
-        console.log("[hls-proxy] Auto-started rtsp-proxy/server.js");
-      } catch (e) {
-        console.error("[hls-proxy] Failed to start:", e);
-      }
+      registerCleanup();
+
+      void (async () => {
+        const existingProxy = await probeExistingProxy();
+        if (existingProxy === "ready") {
+          console.log("[hls-proxy] Existing local proxy detected; skipping auto-start.");
+          return;
+        }
+
+        if (existingProxy === "occupied") {
+          console.warn(
+            "[hls-proxy] Port 8888 is already occupied by an incomplete proxy; skipping auto-start to avoid conflict."
+          );
+          return;
+        }
+
+        try {
+          proxyProcess = spawn("node", [serverFile], {
+            cwd: proxyDir,
+            stdio: ["ignore", "pipe", "pipe"],
+            shell: false,
+          });
+          proxyProcess.stdout?.on("data", (d: Buffer) =>
+            console.log(`[hls-proxy] ${d.toString().trim()}`)
+          );
+          proxyProcess.stderr?.on("data", (d: Buffer) =>
+            console.error(`[hls-proxy] ${d.toString().trim()}`)
+          );
+          proxyProcess.on("error", (err) =>
+            console.error(`[hls-proxy] spawn error: ${err.message}`)
+          );
+          proxyProcess.on("close", (code) => {
+            console.log(`[hls-proxy] exited (code ${code})`);
+            proxyProcess = null;
+          });
+          console.log("[hls-proxy] Auto-started rtsp-proxy/server.js");
+        } catch (e) {
+          console.error("[hls-proxy] Failed to start:", e);
+        }
+      })();
     },
-    buildEnd() {
-      if (proxyProcess && !proxyProcess.killed) {
-        proxyProcess.kill();
-        proxyProcess = null;
-      }
+    closeBundle() {
+      stopProxy();
     },
   };
 }

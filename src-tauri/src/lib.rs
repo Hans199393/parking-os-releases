@@ -13,6 +13,36 @@ use std::io::Write;
 
 const DEV_FFMPEG_PATH: &str = r"G:\parking_2026\ffmpeg-8.1-essentials_build\bin\ffmpeg.exe";
 const CAMERA_PROXY_LOG_FILE: &str = "camera-proxy.log";
+const LEGACY_CAMERA_RTSP_MIGRATIONS: [(&str, &str, &str); 2] = [
+    (
+        "cam1_rtsp_url",
+        "rtsp://admin:<REDACTED_RTSP_PASSWORD>@192.168.0.50:37777/cam/realmonitor?channel=1&subtype=0",
+        "rtsp://admin:<REDACTED_RTSP_PASSWORD>@192.168.0.51:554/cam/realmonitor?channel=1&subtype=0",
+    ),
+    (
+        "cam3_rtsp_url",
+        "rtsp://192.168.0.53:554/onvif1",
+        "rtsp://192.168.0.50:554/onvif1",
+    ),
+];
+
+#[derive(Deserialize)]
+struct ProxyHealthCamera {
+    id: String,
+}
+
+#[derive(Deserialize)]
+struct ProxyHealthPayload {
+    status: Option<String>,
+    #[serde(default)]
+    cameras: Vec<ProxyHealthCamera>,
+}
+
+enum ExistingProxyState {
+    None,
+    Ready,
+    OccupiedButIncomplete,
+}
 
 #[cfg(windows)]
 fn normalize_runtime_path(path: &Path) -> PathBuf {
@@ -114,6 +144,36 @@ fn read_settings_json(app: &AppHandle) -> Value {
         .unwrap_or_else(|| Value::Object(Default::default()))
 }
 
+fn migrate_legacy_camera_settings(app: &AppHandle) -> Result<bool, String> {
+    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let settings_path = app_data_dir.join("settings.json");
+    if !settings_path.exists() {
+        return Ok(false);
+    }
+
+    let raw = std::fs::read_to_string(&settings_path).map_err(|e| e.to_string())?;
+    let mut settings = serde_json::from_str::<Value>(&raw).map_err(|e| e.to_string())?;
+    let Some(object) = settings.as_object_mut() else {
+        return Ok(false);
+    };
+
+    let mut changed = false;
+
+    for (key, legacy_value, current_value) in LEGACY_CAMERA_RTSP_MIGRATIONS {
+        if object.get(key).and_then(Value::as_str) == Some(legacy_value) {
+            object.insert(key.to_string(), Value::String(current_value.to_string()));
+            changed = true;
+        }
+    }
+
+    if changed {
+        let serialized = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+        std::fs::write(&settings_path, serialized).map_err(|e| e.to_string())?;
+    }
+
+    Ok(changed)
+}
+
 fn read_setting_string(settings: &Value, key: &str) -> String {
     settings
         .get(key)
@@ -124,6 +184,81 @@ fn read_setting_string(settings: &Value, key: &str) -> String {
             _ => None,
         })
         .unwrap_or_default()
+}
+
+fn expected_proxy_camera_ids(app: &AppHandle) -> Vec<String> {
+    let settings = read_settings_json(app);
+    [
+        ("cam1", "cam1_rtsp_url"),
+        ("cam2", "cam2_rtsp_url"),
+        ("cam3", "cam3_rtsp_url"),
+        ("cam4", "cam4_rtsp_url"),
+    ]
+    .into_iter()
+    .filter_map(|(camera_id, key)| {
+        let value = read_setting_string(&settings, key);
+        if value.trim().is_empty() {
+            None
+        } else {
+            Some(camera_id.to_string())
+        }
+    })
+    .collect()
+}
+
+fn detect_existing_proxy_state(app: &AppHandle) -> ExistingProxyState {
+    let expected_cameras = expected_proxy_camera_ids(app);
+    if expected_cameras.is_empty() {
+        return ExistingProxyState::None;
+    }
+
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_millis(1200))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return ExistingProxyState::None,
+    };
+
+    let response = match client.get("http://127.0.0.1:8888/").send() {
+        Ok(response) => response,
+        Err(_) => return ExistingProxyState::None,
+    };
+
+    if !response.status().is_success() {
+        return ExistingProxyState::OccupiedButIncomplete;
+    }
+
+    let payload = match response.json::<ProxyHealthPayload>() {
+        Ok(payload) => payload,
+        Err(_) => return ExistingProxyState::OccupiedButIncomplete,
+    };
+
+    let lists_expected_cameras = payload.status.as_deref() == Some("running")
+        && expected_cameras.iter().all(|camera_id| {
+            payload
+                .cameras
+                .iter()
+                .any(|camera| camera.id == camera_id.as_str())
+        });
+
+    if !lists_expected_cameras {
+        return ExistingProxyState::OccupiedButIncomplete;
+    }
+
+    let manifests_ok = expected_cameras.iter().all(|camera_id| {
+        client
+            .get(format!("http://127.0.0.1:8888/stream/{}.m3u8", camera_id))
+            .send()
+            .map(|response| response.status().is_success())
+            .unwrap_or(false)
+    });
+
+    if manifests_ok {
+        ExistingProxyState::Ready
+    } else {
+        ExistingProxyState::OccupiedButIncomplete
+    }
 }
 
 fn proxy_log_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -265,6 +400,23 @@ fn start_proxy_process(app: &AppHandle, process: &ProxyProcess, force_restart: b
     if already_running && !force_restart {
         append_proxy_log(app, "[proxy] Start pominięty — proces już działa.");
         return Ok(());
+    }
+
+    if !already_running {
+        match detect_existing_proxy_state(app) {
+            ExistingProxyState::Ready => {
+                let _ = guard.take();
+                append_proxy_log(app, "[proxy] Start pominięty — lokalny proxy już odpowiada i udostepnia oczekiwane streamy.");
+                return Ok(());
+            }
+            ExistingProxyState::OccupiedButIncomplete => {
+                let _ = guard.take();
+                let message = "Port 8888 jest zajety przez inna instancje proxy kamer, ale nie udostepnia wszystkich oczekiwanych streamow. Zamknij stare procesy node/mediamtx i uruchom proxy ponownie.";
+                append_proxy_log(app, &format!("[proxy] {}", message));
+                return Err(message.to_string());
+            }
+            ExistingProxyState::None => {}
+        }
     }
 
     if let Some(mut child) = guard.take() {
@@ -1189,6 +1341,14 @@ pub fn run() {
                         let _ = std::fs::copy(&default_settings, &settings_path);
                     }
                 }
+            }
+            match migrate_legacy_camera_settings(&app_handle) {
+                Ok(true) => append_proxy_log(
+                    &app_handle,
+                    "[settings] Zmigrowano stare adresy RTSP kamer do aktualnych wartosci.",
+                ),
+                Ok(false) => {}
+                Err(e) => eprintln!("[settings] Migracja adresow RTSP nieudana: {}", e),
             }
             // ── Auto-start RTSP→HLS proxy ──────────────────────────────────
             if let Some(state) = app.try_state::<ProxyProcess>() {
