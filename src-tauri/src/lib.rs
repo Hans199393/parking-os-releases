@@ -13,16 +13,18 @@ use std::io::Write;
 
 const DEV_FFMPEG_PATH: &str = r"G:\parking_2026\ffmpeg-8.1-essentials_build\bin\ffmpeg.exe";
 const CAMERA_PROXY_LOG_FILE: &str = "camera-proxy.log";
-const LEGACY_CAMERA_RTSP_MIGRATIONS: [(&str, &str, &str); 2] = [
+const LEGACY_CAMERA_RTSP_MIGRATIONS: [(&str, &str, &str, &str); 2] = [
     (
         "cam1_rtsp_url",
-        "rtsp://admin:<REDACTED_RTSP_PASSWORD>@192.168.0.50:37777/cam/realmonitor?channel=1&subtype=0",
-        "rtsp://admin:<REDACTED_RTSP_PASSWORD>@192.168.0.51:554/cam/realmonitor?channel=1&subtype=0",
+        "192.168.0.50:37777",
+        "/cam/realmonitor?channel=1&subtype=0",
+        "192.168.0.51:554",
     ),
     (
         "cam3_rtsp_url",
-        "rtsp://192.168.0.53:554/onvif1",
-        "rtsp://192.168.0.50:554/onvif1",
+        "192.168.0.53:554",
+        "/onvif1",
+        "192.168.0.50:554",
     ),
 ];
 
@@ -42,6 +44,39 @@ enum ExistingProxyState {
     None,
     Ready,
     OccupiedButIncomplete,
+}
+
+fn migrate_legacy_rtsp_url(
+    value: &str,
+    legacy_host: &str,
+    legacy_path: &str,
+    current_host: &str,
+) -> Option<String> {
+    let scheme_separator = "://";
+    let scheme_index = value.find(scheme_separator)?;
+    let authority_start = scheme_index + scheme_separator.len();
+    let path_index = value[authority_start..].find('/')? + authority_start;
+    let authority = &value[authority_start..path_index];
+    let path = &value[path_index..];
+
+    if path != legacy_path {
+        return None;
+    }
+
+    let host = authority.rsplit('@').next()?;
+    if host != legacy_host {
+        return None;
+    }
+
+    let userinfo = authority.strip_suffix(host).unwrap_or("");
+
+    Some(format!(
+        "{}{}{}{}",
+        &value[..authority_start],
+        userinfo,
+        current_host,
+        path
+    ))
 }
 
 #[cfg(windows)]
@@ -159,9 +194,13 @@ fn migrate_legacy_camera_settings(app: &AppHandle) -> Result<bool, String> {
 
     let mut changed = false;
 
-    for (key, legacy_value, current_value) in LEGACY_CAMERA_RTSP_MIGRATIONS {
-        if object.get(key).and_then(Value::as_str) == Some(legacy_value) {
-            object.insert(key.to_string(), Value::String(current_value.to_string()));
+    for (key, legacy_host, legacy_path, current_host) in LEGACY_CAMERA_RTSP_MIGRATIONS {
+        if let Some(updated_value) = object
+            .get(key)
+            .and_then(Value::as_str)
+            .and_then(|value| migrate_legacy_rtsp_url(value, legacy_host, legacy_path, current_host))
+        {
+            object.insert(key.to_string(), Value::String(updated_value));
             changed = true;
         }
     }

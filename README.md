@@ -1,5 +1,7 @@
 # Parking.OS — System Zarządzania Parkingiem
 
+> Zasada nadrzedna: przed jakakolwiek praca z konfiguracja przeczytaj `G:\parking_2026\000_NADRZEDNA_POLITYKA_SEKRETOW.md` i uruchom `npm run secrets:scan` przed pushem.
+
 Desktopowa aplikacja dla operatora parkingu Sobieszewo (Gdańsk).  
 Zbudowana na Tauri v2 + React 19 + TypeScript + Vite.
 
