@@ -59,22 +59,26 @@ function buildSideBySideSignature(currentHtml: string): string {
 </table>`;
 }
 
-function Field({ label, value, onChange, placeholder, type = 'text', mono = false, hint }: {
+function Field({ label, value, onChange, placeholder, type = 'text', mono = false, hint, disabled = false, masked = false }: {
   label: string; value: string; onChange: (v: string) => void; placeholder?: string;
   type?: string; mono?: boolean; hint?: string;
+  disabled?: boolean; masked?: boolean;
 }) {
   const [reveal, setReveal] = useState(false);
   const isPassword = type === 'password';
+  const showMaskedValue = masked && isPassword;
   return (
     <div className="flex flex-col gap-1.5">
       <label className="text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--color-text-muted)]">{label}</label>
       <div className="relative">
         <input
-          type={isPassword && !reveal ? 'password' : 'text'}
-          value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-          className={`w-full px-3.5 py-2.5 ${isPassword ? 'pr-10' : ''} rounded-[var(--radius-md)] border-2 border-[var(--color-border)] bg-transparent text-[var(--color-text)] text-sm transition-all hover:border-[var(--color-border-strong)] focus:outline-none focus:border-[var(--color-accent)] ${mono ? 'font-mono' : ''}`}
+          type={showMaskedValue ? 'text' : (isPassword && !reveal ? 'password' : 'text')}
+          value={showMaskedValue ? '************' : value}
+          onChange={e => { if (!disabled && !showMaskedValue) onChange(e.target.value); }} placeholder={placeholder}
+          disabled={disabled || showMaskedValue}
+          className={`w-full px-3.5 py-2.5 ${(isPassword && !showMaskedValue) ? 'pr-10' : ''} rounded-[var(--radius-md)] border-2 border-[var(--color-border)] bg-transparent text-[var(--color-text)] text-sm transition-all hover:border-[var(--color-border-strong)] focus:outline-none focus:border-[var(--color-accent)] disabled:opacity-70 disabled:cursor-not-allowed ${mono ? 'font-mono' : ''}`}
         />
-        {isPassword && (
+        {isPassword && !showMaskedValue && (
           <button type="button" onClick={() => setReveal(r => !r)}
             className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
             {reveal ? <EyeOff size={15} /> : <Eye size={15} />}
@@ -265,7 +269,7 @@ export default function IntegrationsTab({ values, set }: Props) {
           <Field label="URL projektu" value={values.supabase_url ?? ''} onChange={v => setG('supabase_url', v)}
             placeholder="https://xxx.supabase.co" mono />
           <Field label="Service Key (anon lub service_role)" type="password" value={values.supabase_key ?? ''}
-            onChange={v => setG('supabase_key', v)} placeholder="eyJ..." mono
+            onChange={v => setG('supabase_key', v)} placeholder="eyJ..." mono disabled={!canEdit} masked={!canEdit}
             hint="service_role omija RLS — używaj tylko gdy aplikacja działa lokalnie" />
         </div>
         <div className="mt-4 flex items-center gap-3">
@@ -306,7 +310,7 @@ export default function IntegrationsTab({ values, set }: Props) {
           </div>
           <Field label="Login (adres e-mail)" value={values.email_user ?? ''} onChange={v => setG('email_user', v)}
             placeholder="kontakt@parkingsobieszewo.pl" mono />
-          <Field label="Hasło" type="password" value={values.email_pass ?? ''} onChange={v => setG('email_pass', v)} />
+          <Field label="Hasło" type="password" value={values.email_pass ?? ''} onChange={v => setG('email_pass', v)} disabled={!canEdit} masked={!canEdit} />
         </div>
         <div className="mt-4 flex items-center gap-3">
           <Button variant="secondary" size="sm" onClick={handleTestImap} loading={testingMail}>
@@ -397,7 +401,7 @@ export default function IntegrationsTab({ values, set }: Props) {
           <Field label="URL panelu" value={values.admin_url ?? ''} onChange={v => setG('admin_url', v)}
             placeholder="https://twoja-domena.pl/zaplecze-mk" mono />
           <Field label="ADMIN_TOKEN (Bearer — z env Vercel)" type="password" value={values.admin_token ?? ''}
-            onChange={v => setG('admin_token', v)} placeholder="długi sekret" mono
+            onChange={v => setG('admin_token', v)} placeholder="długi sekret" mono disabled={!canEdit} masked={!canEdit}
             hint="Token z env ADMIN_TOKEN w panelu Vercel" />
         </div>
       </div>
@@ -414,7 +418,7 @@ export default function IntegrationsTab({ values, set }: Props) {
           </div>
         </div>
         <div className="space-y-3">
-          <Field label="GROQ_API_KEY" type="password" value={values.groq_api_key ?? ''} onChange={v => setG('groq_api_key', v)}
+          <Field label="GROQ_API_KEY" type="password" value={values.groq_api_key ?? ''} onChange={v => setG('groq_api_key', v)} disabled={!canEdit} masked={!canEdit}
             placeholder="gsk_..." mono
             hint="Pobierz darmowy klucz: https://console.groq.com/keys" />
           <Field label="Model" value={values.groq_model ?? 'llama-3.3-70b-versatile'} onChange={v => setG('groq_model', v)}
