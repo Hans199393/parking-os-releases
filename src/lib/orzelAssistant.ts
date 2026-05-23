@@ -471,9 +471,9 @@ export const TOOLS: OrzelTool[] = [
   },
 ];
 
-// ─── Groq client (OpenAI-compatible) ─────────────────────────────────────────
+// ─── OpenAI-compatible client (Groq by default) ─────────────────────────────
 
-const GROQ_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const DEFAULT_ORZEL_API_BASE_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 export interface OrzelMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -488,6 +488,14 @@ export interface OrzelTurnResult {
   toolCalls: { name: string; args: unknown; result: unknown }[];
   usage?: { prompt_tokens: number; completion_tokens: number };
   error?: string;
+}
+
+function classifyOrzelError(message: string): string {
+  if (/Klucz API jest nieważny albo został wyłączony/i.test(message)) return 'auth_invalid';
+  if (/Endpoint AI zwrócił 404/i.test(message)) return 'endpoint_not_found';
+  if (/Rate limit \(429\)/i.test(message)) return 'rate_limit';
+  if (/Failed to fetch|NetworkError|Load failed|fetch failed/i.test(message)) return 'network_error';
+  return 'runtime_error';
 }
 
 // Iter 12-pre: prompt budowany dynamicznie + CACHE w pamięci modułu na 5 minut.
@@ -613,6 +621,7 @@ const runToolCalls: Map<string, number[]> = new Map();
 interface GroqConfig {
   apiKey: string;
   model: string;
+  apiBaseUrl: string;
   temperature: number;
 }
 
@@ -620,10 +629,11 @@ async function loadConfig(): Promise<GroqConfig | null> {
   const store = await getStore();
   const apiKey = (await store.get<string>('groq_api_key')) ?? '';
   const model = (await store.get<string>('groq_model')) ?? 'llama-3.3-70b-versatile';
+  const apiBaseUrl = ((await store.get<string>('orzel_api_base_url')) ?? DEFAULT_ORZEL_API_BASE_URL).trim() || DEFAULT_ORZEL_API_BASE_URL;
   const tempStr = (await store.get<string>('orzel_temperature')) ?? '0.3';
   const temperature = Math.max(0, Math.min(1, parseFloat(tempStr) || 0.3));
   if (!apiKey) return null;
-  return { apiKey, model, temperature };
+  return { apiKey, model, apiBaseUrl, temperature };
 }
 
 export async function isOrzelConfigured(): Promise<boolean> {
@@ -650,7 +660,7 @@ async function callGroq(
   usage?: { prompt_tokens: number; completion_tokens: number };
 }> {
   // Try request, on 429 attempt one fallback retry with smaller/cheaper model (do not persist change)
-  const doRequest = async (model: string) => await fetch(GROQ_URL, {
+  const doRequest = async (model: string) => await fetch(cfg.apiBaseUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -698,7 +708,10 @@ async function callGroq(
       throw new Error(`Rate limit (429): ${tip}`);
     }
     if (res.status === 401) {
-      throw new Error('Nieprawidłowy klucz Groq API. Sprawdź w Ustawieniach → Integracje → AI Asystent.');
+      throw new Error('Klucz API jest nieważny albo został wyłączony. Jeśli używasz Groq, wygeneruj nowy w console.groq.com/keys. Jeśli używasz innego endpointu, podmień bearer key w Ustawieniach → Integracje → AI Asystent.');
+    }
+    if (res.status === 404) {
+      throw new Error('Endpoint AI zwrócił 404. Sprawdź pełny URL OpenAI-compatible, zwykle kończy się na /chat/completions.');
     }
     if (res.status === 400 && body.includes('tool_use_failed')) {
       throw new Error(`Model nie potrafił sformułować wywołania narzędzia. Spróbuj przeformułować pytanie konkretniej (np. "finanse za lipiec 2025").`);
@@ -824,6 +837,6 @@ export async function chatTurn(history: OrzelMessage[], userInput: string): Prom
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     void audit('chat', 'orzel_error', { metadata: { error: msg } });
-    return { message: `❌ Błąd asystenta: ${msg}`, toolCalls, error: msg };
+    return { message: `❌ Błąd asystenta: ${msg}`, toolCalls, error: classifyOrzelError(msg) };
   }
 }

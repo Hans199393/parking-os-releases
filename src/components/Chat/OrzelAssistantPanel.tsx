@@ -26,6 +26,8 @@ interface ChatItem {
   error?: boolean;
 }
 
+type OrzelIssue = 'no_config' | 'auth_invalid' | 'endpoint_not_found' | 'rate_limit' | 'network_error' | null;
+
 // Suggestions były tu wcześniej — przeniesione do lib/orzelQuickActions.ts.
 
 export default function OrzelAssistantPanel() {
@@ -33,13 +35,27 @@ export default function OrzelAssistantPanel() {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const [issue, setIssue] = useState<OrzelIssue>(null);
   const [quickActions, setQuickActions] = useState<QuickActionBlock[]>(DEFAULT_QUICK_ACTION_BLOCKS);
   const perm = usePerm();
   const idRef = useRef(0);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    void isOrzelConfigured().then(setConfigured);
+    let cancelled = false;
+    const refreshConfig = async () => {
+      const ok = await isOrzelConfigured();
+      if (cancelled) return;
+      setConfigured(ok);
+      setIssue(ok ? null : 'no_config');
+    };
+    void refreshConfig();
+    const onSettingsSaved = () => { void refreshConfig(); };
+    window.addEventListener('app:settings-saved', onSettingsSaved);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('app:settings-saved', onSettingsSaved);
+    };
   }, []);
 
   // Wczytaj bloki quick-actions z ustawień (JSON tablicy { label, tool }).
@@ -76,6 +92,27 @@ export default function OrzelAssistantPanel() {
       .map(i => ({ role: i.role as 'user' | 'assistant', content: i.text }));
   }, [items]);
 
+  const applyResultIssue = useCallback((errorCode?: string) => {
+    if (!errorCode) {
+      setConfigured(true);
+      setIssue(null);
+      return;
+    }
+    if (errorCode === 'no_config') {
+      setConfigured(false);
+      setIssue('no_config');
+      return;
+    }
+    if (errorCode === 'auth_invalid' || errorCode === 'endpoint_not_found' || errorCode === 'rate_limit' || errorCode === 'network_error') {
+      setConfigured(true);
+      setIssue(errorCode);
+      return;
+    }
+    setConfigured(true);
+  }, []);
+
+  const activeIssue: OrzelIssue = configured === false ? 'no_config' : issue;
+
   const send = async () => {
     const text = input.trim();
     if (!text || busy) return;
@@ -98,6 +135,7 @@ export default function OrzelAssistantPanel() {
       } else {
         const history = buildHistory();
         const result = await chatTurn(history, text);
+        applyResultIssue(result.error);
         const aItem: ChatItem = {
           id: ++idRef.current,
           role: 'assistant',
@@ -107,7 +145,6 @@ export default function OrzelAssistantPanel() {
           error: !!result.error,
         };
         setItems(prev => [...prev, aItem]);
-        if (result.error === 'no_config') setConfigured(false);
       }
     } catch (e) {
       setItems(prev => [...prev, {
@@ -151,6 +188,78 @@ export default function OrzelAssistantPanel() {
     } catch (e) {
       return 'Wynik narzędzia (błąd formatowania)';
     }
+  }
+
+  function renderIssueBanner() {
+    if (!activeIssue) return null;
+
+    if (activeIssue === 'auth_invalid') {
+      return (
+        <div className="glass-strong rounded-[var(--radius-md)] p-4 flex items-start gap-3 border-2 border-red-500/40 animate-fadeIn">
+          <AlertCircle size={20} className="text-red-400 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-[var(--color-text)]">
+            <strong>Klucz AI jest nieważny albo wyłączony.</strong>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              Wejdź w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong> i wklej nowy klucz z <code className="px-1 rounded bg-[var(--color-surface-2)]">console.groq.com/keys</code>.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    if (activeIssue === 'endpoint_not_found') {
+      return (
+        <div className="glass-strong rounded-[var(--radius-md)] p-4 flex items-start gap-3 border-2 border-amber-500/40 animate-fadeIn">
+          <AlertCircle size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-[var(--color-text)]">
+            <strong>Endpoint AI jest błędny.</strong>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              Sprawdź URL w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong>. Dla Groq powinien kończyć się na <code className="px-1 rounded bg-[var(--color-surface-2)]">/chat/completions</code>.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    if (activeIssue === 'rate_limit') {
+      return (
+        <div className="glass-strong rounded-[var(--radius-md)] p-4 flex items-start gap-3 border-2 border-amber-500/40 animate-fadeIn">
+          <AlertCircle size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-[var(--color-text)]">
+            <strong>Limit modelu AI został osiągnięty.</strong>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              Poczekaj chwilę albo zmień model w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong> na lżejszy, np. <code className="px-1 rounded bg-[var(--color-surface-2)]">llama-3.1-8b-instant</code>.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    if (activeIssue === 'network_error') {
+      return (
+        <div className="glass-strong rounded-[var(--radius-md)] p-4 flex items-start gap-3 border-2 border-amber-500/40 animate-fadeIn">
+          <AlertCircle size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="text-sm text-[var(--color-text)]">
+            <strong>Brak połączenia z endpointem AI.</strong>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+              Sprawdź internet, firewall i adres endpointu w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong>.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="glass-strong rounded-[var(--radius-md)] p-4 flex items-start gap-3 border-2 border-amber-500/40 animate-fadeIn">
+        <AlertCircle size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
+        <div className="text-sm text-[var(--color-text)]">
+          <strong>Brak klucza Groq.</strong>
+          <p className="mt-1 text-xs text-[var(--color-text-muted)]">
+            Wejdź w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong> i wklej klucz z <code className="px-1 rounded bg-[var(--color-surface-2)]">console.groq.com/keys</code>.
+          </p>
+        </div>
+      </div>
+    );
   }
 
   const onKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -211,7 +320,15 @@ export default function OrzelAssistantPanel() {
             })}
             <button onClick={() => openInputModal('Zadaj pytanie (pełny prompt)', 'Twoje pytanie', async (val) => {
               if (!val) return;
-              try { setBusy(true); const history = buildHistory(); const r = await chatTurn(history, val); setItems(prev => [...prev, { id: ++idRef.current, role: 'assistant', text: r.message, toolCalls: r.toolCalls.length ? r.toolCalls : undefined, ts: Date.now(), error: !!r.error }]); } catch (e) { setItems(prev => [...prev, { id: ++idRef.current, role: 'assistant', text: 'Błąd: ' + String(e), ts: Date.now(), error: true }]); } finally { setBusy(false); }
+              try {
+                setBusy(true);
+                const history = buildHistory();
+                const r = await chatTurn(history, val);
+                applyResultIssue(r.error);
+                setItems(prev => [...prev, { id: ++idRef.current, role: 'assistant', text: r.message, toolCalls: r.toolCalls.length ? r.toolCalls : undefined, ts: Date.now(), error: !!r.error }]);
+              } catch (e) {
+                setItems(prev => [...prev, { id: ++idRef.current, role: 'assistant', text: 'Błąd: ' + String(e), ts: Date.now(), error: true }]);
+              } finally { setBusy(false); }
             })} className="px-2.5 py-1 rounded-md bg-[var(--color-accent)] text-xs text-[#1a1410] font-bold ml-auto" title="Zapytaj Orła pełnym promptem (LLM)">Ask</button>
           </div>
         ) : (
@@ -221,19 +338,9 @@ export default function OrzelAssistantPanel() {
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3 bg-[var(--color-bg)]">
-        {configured === false && (
-          <div className="glass-strong rounded-[var(--radius-md)] p-4 flex items-start gap-3 border-2 border-amber-500/40 animate-fadeIn">
-            <AlertCircle size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
-            <div className="text-sm text-[var(--color-text)]">
-              <strong>Brak klucza Groq.</strong>
-              <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-                Wejdź w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong> i wklej klucz z <code className="px-1 rounded bg-[var(--color-surface-2)]">console.groq.com/keys</code> (darmowy).
-              </p>
-            </div>
-          </div>
-        )}
+        {renderIssueBanner()}
 
-        {items.length === 0 && configured !== false && (
+        {items.length === 0 && !activeIssue && (
           <div className="flex flex-col items-center justify-center py-16 text-center animate-fadeIn">
             <div className="w-16 h-16 rounded-full bg-gradient-accent flex items-center justify-center shadow-[var(--shadow-glow)] mb-4 animate-float-slow">
               <Sparkles size={28} className="text-[#1a1410]" />
