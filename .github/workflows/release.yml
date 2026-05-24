@@ -67,10 +67,32 @@ jobs:
           $tag = "${{ github.ref_name }}"
           if (-not $tag) { $tag = "${{ inputs.tag }}" }
           $version = $tag -replace '^v', ''
-          $nsisName = Split-Path "${{ steps.artifacts.outputs.nsis_path }}" -Leaf
-          $nzipName = Split-Path "${{ steps.artifacts.outputs.nzip_path }}" -Leaf
-          $nsigContent = Get-Content "${{ steps.artifacts.outputs.nsig_path }}" -Raw
-          $zsigContent = Get-Content "${{ steps.artifacts.outputs.zsig_path }}" -Raw
+          $nsis = Get-ChildItem "src-tauri\target\release\bundle\nsis\*-setup.exe" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $nzip = Get-ChildItem "src-tauri\target\release\bundle\nsis\*-setup.nsis.zip" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $nsig = Get-ChildItem "src-tauri\target\release\bundle\nsis\*-setup.exe.sig" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $zsig = Get-ChildItem "src-tauri\target\release\bundle\nsis\*-setup.nsis.zip.sig" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
+          $requiredPaths = [ordered]@{
+            nsis = $nsis?.FullName
+            nzip = $nzip?.FullName
+            nsig = $nsig?.FullName
+            zsig = $zsig?.FullName
+          }
+
+          foreach ($entry in $requiredPaths.GetEnumerator()) {
+            Write-Host ("{0}: {1}" -f $entry.Key, $entry.Value)
+            if (-not $entry.Value) {
+              throw "Missing required updater artifact: $($entry.Key)"
+            }
+            if (-not (Test-Path $entry.Value)) {
+              throw "Updater artifact path does not exist: $($entry.Value)"
+            }
+          }
+
+          $nsisName = Split-Path $requiredPaths.nsis -Leaf
+          $nzipName = Split-Path $requiredPaths.nzip -Leaf
+          $nsigContent = Get-Content $requiredPaths.nsig -Raw
+          $zsigContent = Get-Content $requiredPaths.zsig -Raw
           $repo = "${{ github.repository }}"
           $now  = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
@@ -114,10 +136,10 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            ${{ steps.artifacts.outputs.nsis_path }}
-            ${{ steps.artifacts.outputs.nzip_path }}
-            ${{ steps.artifacts.outputs.nsig_path }}
-            ${{ steps.artifacts.outputs.zsig_path }}
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/*-setup.nsis.zip
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+            src-tauri/target/release/bundle/nsis/*-setup.nsis.zip.sig
             latest.json
           overwrite_files: true
           generate_release_notes: false
