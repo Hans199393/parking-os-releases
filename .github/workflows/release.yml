@@ -90,7 +90,8 @@ jobs:
             }
           } | ConvertTo-Json -Depth 5
 
-          $json | Out-File -FilePath "latest.json" -Encoding utf8NoBOM
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+          [System.IO.File]::WriteAllText((Join-Path $PWD 'latest.json'), $json, $utf8NoBom)
           Write-Host "Generated latest.json:"
           Get-Content "latest.json"
 
