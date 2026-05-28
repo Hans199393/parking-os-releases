@@ -32,6 +32,7 @@ const DEFAULTS: Record<string, string> = {
   session_timeout: '3600',
   confirm_exit: 'true',
   groq_model: 'llama-3.3-70b-versatile',
+  orzel_api_base_url: 'https://api.groq.com/openai/v1/chat/completions',
   orzel_temperature: '0.3',
   orzel_expanded_mode: 'false',
   orzel_quick_actions: '[{"label":"Znajdź tablicę","tool":"find_reservation"},{"label":"Sprawdź obłożenie","tool":"check_capacity"},{"label":"Lista rezerwacji","tool":"list_reservations"}]',
@@ -212,6 +213,7 @@ const KEY_LABELS: Record<string, string> = {
   admin_token: 'admin token',
   groq_api_key: 'klucz Groq',
   groq_model: 'model AI',
+  orzel_api_base_url: 'endpoint AI',
   orzel_temperature: 'kreatywność Orła',
 };
 

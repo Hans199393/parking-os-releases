@@ -28,6 +28,8 @@ export interface QuickActionToolDef {
   placeholder: string;
   /** Czy wartość jest opcjonalna (puste = uruchom z domyślnymi args) */
   optional?: boolean;
+  /** Czy akcja modyfikuje dane (wyświetlana z ostrzeżeniem w UI) */
+  mutating?: boolean;
   /** Mapowanie wartości z modala na obiekt args dla runTool() */
   buildArgs: (val: string) => Record<string, unknown>;
 }
@@ -172,6 +174,59 @@ export const QUICK_ACTION_TOOLS: Record<string, QuickActionToolDef> = {
     placeholder: 'month / year (puste = bieżący miesiąc)',
     optional: true,
     buildArgs: (val) => (val ? { period: val } : {}),
+  },
+
+  // ─── Akcje mutujące ───────────────────────────────────────────────────────
+  cancel_reservation: {
+    name: 'cancel_reservation',
+    defaultLabel: '✕ Anuluj rezerwację',
+    description: 'Anuluje (usuwa) rezerwację po ID',
+    modalTitle: 'Anuluj rezerwację — ID',
+    placeholder: 'UUID rezerwacji (z wyników wyszukiwania)',
+    mutating: true,
+    buildArgs: (val) => ({ id: val }),
+  },
+  ban_vehicle: {
+    name: 'ban_vehicle',
+    defaultLabel: '🚫 Zbanuj tablicę',
+    description: 'Ręcznie banuje tablicę rejestracyjną',
+    modalTitle: 'Zbanuj tablicę — rejestracja (opcjonalnie: powód)',
+    placeholder: 'np. GD12345 (opcjonalnie: GD12345 | powód bana)',
+    mutating: true,
+    buildArgs: (val) => {
+      const parts = val.split('|');
+      return { registration: parts[0]?.trim() ?? val, reason: parts[1]?.trim() ?? undefined };
+    },
+  },
+  unban_vehicle: {
+    name: 'unban_vehicle',
+    defaultLabel: '✓ Odbanuj tablicę',
+    description: 'Usuwa bana dla podanej tablicy',
+    modalTitle: 'Odbanuj tablicę — rejestracja',
+    placeholder: 'np. GD12345',
+    mutating: true,
+    buildArgs: (val) => ({ registration: val }),
+  },
+  mark_no_show: {
+    name: 'mark_no_show',
+    defaultLabel: '⚠ No-show',
+    description: 'Oznacza rezerwację jako no-show (może zautomatycznie zbanować)',
+    modalTitle: 'No-show — ID rezerwacji | tablica',
+    placeholder: 'UUID | tablica, np. abc-123 | GD12345',
+    mutating: true,
+    buildArgs: (val) => {
+      const parts = val.split('|');
+      return { id: parts[0]?.trim() ?? '', registration: parts[1]?.trim() ?? '' };
+    },
+  },
+  set_spots_available: {
+    name: 'set_spots_available',
+    defaultLabel: '🅿 Stan miejsc',
+    description: 'Ustawia dostępność miejsc na stronie (true/false)',
+    modalTitle: 'Stan miejsc parkingowych',
+    placeholder: 'true = są miejsca  /  false = brak miejsc',
+    mutating: true,
+    buildArgs: (val) => ({ available: val.trim().toLowerCase() !== 'false' }),
   },
 };
 

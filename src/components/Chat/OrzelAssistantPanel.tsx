@@ -1,14 +1,14 @@
 /**
- * OrzelAssistantPanel — czat operatora z lokalnym asystentem AI (Iter 5).
- * Function calling przez Groq, narzędzia w lib/orzelAssistant.ts.
+ * OrzelAssistantPanel — czat operatora z lokalnym asystentem AI (Iter 15).
+ * Function calling przez Ollama (lokalny LLM), narzędzia w lib/orzelAssistant.ts.
  */
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Sparkles, Send, Trash2, Wrench, Bot as BotIcon, AlertCircle, User as UserIcon } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
+import { Sparkles, Send, Trash2, Wrench, Bot as BotIcon, AlertCircle, User as UserIcon, Circle, Zap } from 'lucide-react';
 import { chatTurn, isOrzelConfigured, runTool, type OrzelMessage } from '../../lib/orzelAssistant';
 import { Modal, Button, Input } from '../shared/UI';
 import { usePerm } from '../../lib/usePerm';
-import { Spinner } from '../shared/UI';
 import { getStore } from '../../lib/store';
 import {
   QUICK_ACTION_TOOLS,
@@ -37,6 +37,8 @@ export default function OrzelAssistantPanel() {
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [issue, setIssue] = useState<OrzelIssue>(null);
   const [quickActions, setQuickActions] = useState<QuickActionBlock[]>(DEFAULT_QUICK_ACTION_BLOCKS);
+  const [ollamaStarting, setOllamaStarting] = useState(false);
+  const ollamaAutoTriedRef = useRef(false);
   const perm = usePerm();
   const idRef = useRef(0);
   const endRef = useRef<HTMLDivElement>(null);
@@ -88,7 +90,7 @@ export default function OrzelAssistantPanel() {
   const buildHistory = useCallback((): OrzelMessage[] => {
     return items
       .filter(i => !i.error && i.role !== 'system')
-      .slice(-12) // ostatnie 12 (6 par)
+      .slice(-40) // ostatnie 20 par (40 wiadomości) — Ollama bez limitów TPM
       .map(i => ({ role: i.role as 'user' | 'assistant', content: i.text }));
   }, [items]);
 
@@ -110,6 +112,28 @@ export default function OrzelAssistantPanel() {
     }
     setConfigured(true);
   }, []);
+
+  const handleStartOllama = useCallback(async () => {
+    setOllamaStarting(true);
+    try {
+      await invoke('start_ollama');
+      // Daj Ollamie 2s na start
+      await new Promise(r => setTimeout(r, 2000));
+      setIssue(null);
+    } catch {
+      // pozostaw baner — Ollama nie zainstalowana lub inna przeszkoda
+    } finally {
+      setOllamaStarting(false);
+    }
+  }, []);
+
+  // Auto-start Ollamy przy pierwszym błędzie sieciowym
+  useEffect(() => {
+    if (issue === 'network_error' && !ollamaAutoTriedRef.current) {
+      ollamaAutoTriedRef.current = true;
+      void handleStartOllama();
+    }
+  }, [issue, handleStartOllama]);
 
   const activeIssue: OrzelIssue = configured === false ? 'no_config' : issue;
 
@@ -157,14 +181,39 @@ export default function OrzelAssistantPanel() {
   };
 
   // Modal state for quick-actions / confirmations
+  // Model name from store for display
+  const [modelName, setModelName] = useState<string>('llama3.1:8b');
+  useEffect(() => {
+    void (async () => {
+      try {
+        const store = await getStore();
+        const m = (await store.get<string>('groq_model')) ?? 'llama3.1:8b';
+        setModelName(m);
+      } catch { /* ignore */ }
+    })();
+    const onSaved = async () => {
+      try {
+        const store = await getStore();
+        const m = (await store.get<string>('groq_model')) ?? 'llama3.1:8b';
+        setModelName(m);
+      } catch { /* ignore */ }
+    };
+    window.addEventListener('app:settings-saved', onSaved as EventListener);
+    return () => window.removeEventListener('app:settings-saved', onSaved as EventListener);
+  }, []);
+
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmTitle, setConfirmTitle] = useState('');
   const [confirmInput, setConfirmInput] = useState('');
+  const [confirmPlaceholder, setConfirmPlaceholder] = useState('');
+  const [confirmIsMutating, setConfirmIsMutating] = useState(false);
   const confirmCb = useRef<(val?: string) => Promise<void> | void>(() => {});
 
-  const openInputModal = (title: string, _placeholder: string, cb: (val: string) => Promise<void>) => {
+  const openInputModal = (title: string, placeholder: string, cb: (val: string) => Promise<void>, mutating = false) => {
     setConfirmTitle(title);
     setConfirmInput('');
+    setConfirmPlaceholder(placeholder);
+    setConfirmIsMutating(mutating);
     confirmCb.current = async (v?: string) => { await cb(v ?? ''); };
     setConfirmOpen(true);
   };
@@ -198,9 +247,10 @@ export default function OrzelAssistantPanel() {
         <div className="glass-strong rounded-[var(--radius-md)] p-4 flex items-start gap-3 border-2 border-red-500/40 animate-fadeIn">
           <AlertCircle size={20} className="text-red-400 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-[var(--color-text)]">
-            <strong>Klucz AI jest nieważny albo wyłączony.</strong>
+            <strong>Klucz AI jest nieważny lub wymagany przez endpoint.</strong>
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-              Wejdź w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong> i wklej nowy klucz z <code className="px-1 rounded bg-[var(--color-surface-2)]">console.groq.com/keys</code>.
+              Otwarte w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong>.
+              Ollama nie wymaga klucza (zostaw puste). Jeśli używasz Groq, wklej klucz z <code className="px-1 rounded bg-[var(--color-surface-2)]">console.groq.com/keys</code>.
             </p>
           </div>
         </div>
@@ -214,7 +264,8 @@ export default function OrzelAssistantPanel() {
           <div className="text-sm text-[var(--color-text)]">
             <strong>Endpoint AI jest błędny.</strong>
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-              Sprawdź URL w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong>. Dla Groq powinien kończyć się na <code className="px-1 rounded bg-[var(--color-surface-2)]">/chat/completions</code>.
+              Sprawdź URL w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong>.
+              Ollama: <code className="px-1 rounded bg-[var(--color-surface-2)]">http://localhost:11434/v1/chat/completions</code>.
             </p>
           </div>
         </div>
@@ -226,9 +277,9 @@ export default function OrzelAssistantPanel() {
         <div className="glass-strong rounded-[var(--radius-md)] p-4 flex items-start gap-3 border-2 border-amber-500/40 animate-fadeIn">
           <AlertCircle size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
           <div className="text-sm text-[var(--color-text)]">
-            <strong>Limit modelu AI został osiągnięty.</strong>
+            <strong>Limit tokenów został osiągnięty.</strong>
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-              Poczekaj chwilę albo zmień model w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong> na lżejszy, np. <code className="px-1 rounded bg-[var(--color-surface-2)]">llama-3.1-8b-instant</code>.
+              Przy używaniu Ollama lokalnie nie ma limitów TPM. Spróbuj ponownie lub zmień model w <strong>Ustawienia → Integracje</strong> na lżejszy, np. <code className="px-1 rounded bg-[var(--color-surface-2)]">llama3.2:3b</code>.
             </p>
           </div>
         </div>
@@ -239,11 +290,25 @@ export default function OrzelAssistantPanel() {
       return (
         <div className="glass-strong rounded-[var(--radius-md)] p-4 flex items-start gap-3 border-2 border-amber-500/40 animate-fadeIn">
           <AlertCircle size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
-          <div className="text-sm text-[var(--color-text)]">
-            <strong>Brak połączenia z endpointem AI.</strong>
+          <div className="text-sm text-[var(--color-text)] flex-1">
+            <strong>Brak połączenia z Ollama.</strong>
             <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-              Sprawdź internet, firewall i adres endpointu w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong>.
+              {ollamaStarting
+                ? 'Uruchamianie Ollama… czekaj 2 s.'
+                : 'Ollama nie jest uruchomiona lub model nie jest pobrany.'}
             </p>
+            {!ollamaStarting && (
+              <div className="mt-2 flex gap-2 flex-wrap">
+                <button
+                  onClick={() => void handleStartOllama()}
+                  className="px-2.5 py-1 rounded-md text-xs bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 transition-colors">
+                  ▶️ Uruchom ollama serve
+                </button>
+                <span className="text-xs text-[var(--color-text-muted)] self-center">
+                  lub: <code className="px-1 rounded bg-[var(--color-surface-2)]">ollama pull llama3.1:8b</code>
+                </span>
+              </div>
+            )}
           </div>
         </div>
       );
@@ -253,9 +318,10 @@ export default function OrzelAssistantPanel() {
       <div className="glass-strong rounded-[var(--radius-md)] p-4 flex items-start gap-3 border-2 border-amber-500/40 animate-fadeIn">
         <AlertCircle size={20} className="text-amber-400 flex-shrink-0 mt-0.5" />
         <div className="text-sm text-[var(--color-text)]">
-          <strong>Brak klucza Groq.</strong>
+          <strong>Asystent nie jest skonfigurowany.</strong>
           <p className="mt-1 text-xs text-[var(--color-text-muted)]">
-            Wejdź w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong> i wklej klucz z <code className="px-1 rounded bg-[var(--color-surface-2)]">console.groq.com/keys</code>.
+            Wejdź w <strong>Ustawienia → Integracje → AI Asystent (Orzeł)</strong>.
+            Ustaw endpoint Ollama: <code className="px-1 rounded bg-[var(--color-surface-2)]">http://localhost:11434/v1/chat/completions</code> i model: <code className="px-1 rounded bg-[var(--color-surface-2)]">llama3.1:8b</code>.
           </p>
         </div>
       </div>
@@ -271,18 +337,20 @@ export default function OrzelAssistantPanel() {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      {/* Header — dwie linie: tytuł+wyczyść, potem rząd przycisków szybkich akcji */}
+      {/* Header */}
       <div className="px-5 pt-3 pb-2 border-b border-[var(--color-border)] bg-[var(--color-bg)]">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-[var(--radius-md)] bg-gradient-accent flex items-center justify-center shadow-[var(--shadow-md)] flex-shrink-0">
+            <div className="w-9 h-9 rounded-[var(--radius-md)] bg-gradient-accent flex items-center justify-center shadow-[var(--shadow-md)] flex-shrink-0">
               <Sparkles size={16} className="text-[#1a1410]" />
             </div>
             <div className="min-w-0">
-              <div className="text-sm font-bold text-[var(--color-text)]">Asystent Orzeł</div>
-              <div className="text-[10px] text-[var(--color-text-muted)] truncate">
-                function calling · {quickActions.length} {quickActions.length === 1 ? 'szybka akcja' : 'szybkich akcji'} · pamięć krótka (12 wiadomości)
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-[var(--color-text)]">Orzeł</span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--color-surface-2)] text-[var(--color-text-muted)] border border-[var(--color-border)] truncate max-w-[140px]" title={modelName}>{modelName}</span>
+                <Circle size={8} className={configured === true ? 'text-emerald-400 fill-emerald-400' : 'text-[var(--color-text-muted)] fill-current opacity-30'} />
               </div>
+              <div className="text-[10px] text-[var(--color-text-muted)] truncate">Ollama · function calling · pamięć 20 wiadomości</div>
             </div>
           </div>
           {items.length > 0 && (
@@ -293,14 +361,15 @@ export default function OrzelAssistantPanel() {
           )}
         </div>
 
-        {/* Rząd szybkich akcji + Ask — pełna szerokość, zawijanie naturalne */}
+        {/* Quick actions */}
         {perm.has('chat.use') ? (
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
             {quickActions.map((qa, idx) => {
               const def = QUICK_ACTION_TOOLS[qa.tool];
               if (!def) return null;
+              const isMutating = !!def.mutating;
               return (
-                <button key={`${qa.tool}-${idx}`} title={`${def.description} (${def.name})`}
+                <button key={`${qa.tool}-${idx}`} title={def.description}
                   onClick={() => openInputModal(def.modalTitle, def.placeholder, async (val) => {
                     if (!def.optional && !val) return;
                     try {
@@ -312,13 +381,17 @@ export default function OrzelAssistantPanel() {
                     } catch (e) {
                       setItems(prev => [...prev, { id: ++idRef.current, role: 'assistant', text: 'Błąd narzędzia: ' + String(e), ts: Date.now(), error: true }]);
                     } finally { setBusy(false); }
-                  })}
-                  className="px-2.5 py-1 rounded-md bg-[var(--color-surface-2)] hover:bg-[var(--color-surface)] text-xs text-[var(--color-text)] border border-[var(--color-border)]/40">
+                  }, isMutating)}
+                  className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${
+                    isMutating
+                      ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30 hover:border-amber-400/50'
+                      : 'bg-[var(--color-surface-2)] hover:bg-[var(--color-surface)] text-[var(--color-text)] border-[var(--color-border)]/40'
+                  }`}>
                   {qa.label}
                 </button>
               );
             })}
-            <button onClick={() => openInputModal('Zadaj pytanie (pełny prompt)', 'Twoje pytanie', async (val) => {
+            <button onClick={() => openInputModal('Zadaj pytanie Orłowi', 'Twoje pytanie do asystenta AI…', async (val) => {
               if (!val) return;
               try {
                 setBusy(true);
@@ -329,7 +402,11 @@ export default function OrzelAssistantPanel() {
               } catch (e) {
                 setItems(prev => [...prev, { id: ++idRef.current, role: 'assistant', text: 'Błąd: ' + String(e), ts: Date.now(), error: true }]);
               } finally { setBusy(false); }
-            })} className="px-2.5 py-1 rounded-md bg-[var(--color-accent)] text-xs text-[#1a1410] font-bold ml-auto" title="Zapytaj Orła pełnym promptem (LLM)">Ask</button>
+            })}
+              className="px-2.5 py-1 rounded-md bg-gradient-accent text-xs text-[#1a1410] font-bold ml-auto flex items-center gap-1"
+              title="Zapytaj Orła pełnym promptem (LLM)">
+              <Zap size={11} /> Ask
+            </button>
           </div>
         ) : (
           <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">Brak uprawnień do użycia Asystenta</div>
@@ -341,51 +418,62 @@ export default function OrzelAssistantPanel() {
         {renderIssueBanner()}
 
         {items.length === 0 && !activeIssue && (
-          <div className="flex flex-col items-center justify-center py-16 text-center animate-fadeIn">
-            <div className="w-16 h-16 rounded-full bg-gradient-accent flex items-center justify-center shadow-[var(--shadow-glow)] mb-4 animate-float-slow">
+          <div className="flex flex-col items-center justify-center py-14 text-center animate-fadeIn select-none">
+            <div className="w-16 h-16 rounded-full bg-gradient-accent flex items-center justify-center shadow-[var(--shadow-glow)] mb-4">
               <Sparkles size={28} className="text-[#1a1410]" />
             </div>
-            <h3 className="hero-number text-3xl mb-2">Cześć! Jestem Orzeł.</h3>
-            <p className="text-sm text-[var(--color-text-muted)] max-w-md mb-6">
-              Pomogę ci sprawdzić rezerwacje, obłożenie, bany i ustawienia parkingu. Pytaj naturalnie.
+            <h3 className="text-xl font-bold text-[var(--color-text)] mb-1">Cześć! Jestem Orzeł.</h3>
+            <p className="text-sm text-[var(--color-text-muted)] max-w-xs mb-5 leading-relaxed">
+              Pytaj o rezerwacje, obciążenie, bany, przychody i wiele więcej.
+              Dane zostają na twoim komputerze.
             </p>
-            <div className="text-xs text-[var(--color-text-muted)]">Użyj przycisków u góry, lub wpisz pytanie.</div>
+            <div className="flex flex-wrap gap-2 justify-center text-[11px] text-[var(--color-text-muted)] opacity-60">
+              <span>"podsumowanie tygodnia"</span>
+              <span>·</span>
+              <span>"ile wolnych miejsc jutro"</span>
+              <span>·</span>
+              <span>"bany z tego miesiąca"</span>
+            </div>
           </div>
         )}
 
         {items.map(item => (
           <div key={item.id} className={`flex gap-3 animate-slideUp ${item.role === 'user' ? 'flex-row-reverse' : ''}`}>
-            <div className={`w-8 h-8 rounded-[var(--radius-md)] flex items-center justify-center flex-shrink-0 shadow-[var(--shadow-sm)] ${
+            <div className={`w-8 h-8 rounded-[var(--radius-md)] flex items-center justify-center flex-shrink-0 shadow-[var(--shadow-sm)] mt-0.5 ${
               item.role === 'user' ? 'bg-[var(--color-surface-2)] text-[var(--color-text)]' : 'bg-gradient-accent text-[#1a1410]'
             }`}>
-              {item.role === 'user' ? <UserIcon size={15} /> : <BotIcon size={15} />}
+              {item.role === 'user' ? <UserIcon size={14} /> : <BotIcon size={14} />}
             </div>
-            <div className={`max-w-[80%] flex flex-col gap-1.5 ${item.role === 'user' ? 'items-end' : 'items-start'}`}>
-              <div className={`px-4 py-2.5 rounded-[var(--radius-md)] text-sm leading-relaxed whitespace-pre-wrap ${
-                item.error ? 'bg-red-500/10 border border-red-500/40 text-red-300' :
+            <div className={`max-w-[82%] flex flex-col gap-1 ${item.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div className={`px-3.5 py-2.5 rounded-[var(--radius-md)] text-sm leading-relaxed whitespace-pre-wrap break-words ${
+                item.error ? 'bg-red-500/10 border border-red-500/30 text-red-300' :
                 item.role === 'user' ? 'bg-gradient-accent text-[#1a1410] font-medium shadow-[var(--shadow-md)]' :
                 'glass-strong text-[var(--color-text)]'
               }`}>
                 {item.text}
               </div>
               {item.toolCalls && item.toolCalls.length > 0 && (
-                <details className="text-[10px] text-[var(--color-text-muted)] max-w-full">
-                  <summary className="cursor-pointer hover:text-[var(--color-accent)] flex items-center gap-1 select-none">
-                    <Wrench size={11} /> użyte narzędzia: {item.toolCalls.map(t => t.name).join(', ')}
-                  </summary>
-                  <div className="mt-1 space-y-1.5 pl-3 border-l-2 border-[var(--color-border)]">
-                    {item.toolCalls.map((tc, i) => (
-                      <div key={i} className="font-mono text-[10px]">
-                        <div className="text-[var(--color-accent)]">→ {tc.name}({JSON.stringify(tc.args)})</div>
-                        <div className="text-[var(--color-text-muted)] opacity-80 truncate max-w-[600px]">
-                          ← {JSON.stringify(tc.result).slice(0, 240)}{JSON.stringify(tc.result).length > 240 ? '…' : ''}
+                <div className="flex flex-wrap gap-1.5 max-w-full">
+                  {item.toolCalls.map((tc, i) => {
+                    const isMut = ['cancel_reservation','set_reservation_status','mark_no_show','ban_vehicle','unban_vehicle','set_spots_available','add_reservation'].includes(tc.name);
+                    return (
+                      <details key={i} className={`text-[10px] rounded-md px-2 py-1 border cursor-pointer max-w-full ${
+                        isMut ? 'bg-amber-500/8 border-amber-500/25 text-amber-300' : 'bg-[var(--color-surface-2)] border-[var(--color-border)]/40 text-[var(--color-text-muted)]'
+                      }`}>
+                        <summary className="flex items-center gap-1 select-none list-none">
+                          <Wrench size={10} className="flex-shrink-0" />
+                          <span>{tc.name}</span>
+                        </summary>
+                        <div className="mt-1.5 font-mono text-[9px] space-y-0.5 opacity-80">
+                          <div className="text-[var(--color-accent)]">args: {JSON.stringify(tc.args)}</div>
+                          <div className="text-[var(--color-text-muted)] max-w-[480px] truncate">← {JSON.stringify(tc.result).slice(0, 200)}{JSON.stringify(tc.result).length > 200 ? '…' : ''}</div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </details>
+                      </details>
+                    );
+                  })}
+                </div>
               )}
-              <div className="text-[10px] text-[var(--color-text-muted)] opacity-60 px-1">
+              <div className="text-[10px] text-[var(--color-text-muted)] opacity-50 px-0.5">
                 {new Date(item.ts).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}
               </div>
             </div>
@@ -394,11 +482,13 @@ export default function OrzelAssistantPanel() {
 
         {busy && (
           <div className="flex gap-3 animate-fadeIn">
-            <div className="w-8 h-8 rounded-[var(--radius-md)] bg-gradient-accent flex items-center justify-center flex-shrink-0 shadow-[var(--shadow-sm)]">
-              <BotIcon size={15} className="text-[#1a1410]" />
+            <div className="w-8 h-8 rounded-[var(--radius-md)] bg-gradient-accent flex items-center justify-center flex-shrink-0 shadow-[var(--shadow-sm)] mt-0.5">
+              <BotIcon size={14} className="text-[#1a1410]" />
             </div>
-            <div className="glass-strong px-4 py-2.5 rounded-[var(--radius-md)] flex items-center gap-2">
-              <Spinner /> <span className="text-xs text-[var(--color-text-muted)]">Orzeł myśli…</span>
+            <div className="glass-strong px-4 py-3 rounded-[var(--radius-md)] flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] opacity-80 animate-bounce [animation-delay:0ms]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] opacity-80 animate-bounce [animation-delay:150ms]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] opacity-80 animate-bounce [animation-delay:300ms]" />
             </div>
           </div>
         )}
@@ -414,7 +504,7 @@ export default function OrzelAssistantPanel() {
             onChange={e => setInput(e.target.value)}
             onKeyDown={onKey}
             disabled={busy}
-            placeholder="Zapytaj o rezerwacje, obłożenie, bany… (Enter = wyślij, Shift+Enter = nowa linia)"
+            placeholder="Zapytaj o rezerwacje, obciążenie, bany… (Enter = wyślij, Shift+Enter = nowa linia)"
             rows={1}
             className="flex-1 px-3.5 py-2.5 rounded-[var(--radius-md)] border-2 border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text)] text-sm resize-none focus:outline-none focus:border-[var(--color-accent)] disabled:opacity-50 max-h-32"
             style={{ fieldSizing: 'content' } as React.CSSProperties}
@@ -427,13 +517,20 @@ export default function OrzelAssistantPanel() {
           </button>
         </div>
       </div>
-      {/* Confirm / Input Modal */}
+
+      {/* Modal quick-action / confirm */}
       <Modal open={confirmOpen} onClose={() => setConfirmOpen(false)} title={confirmTitle}>
         <div className="space-y-3">
-          <Input label="Wartość" value={confirmInput} onChange={e => setConfirmInput(e.target.value)} placeholder="Wpisz wartość" />
+          {confirmIsMutating && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-[var(--radius-md)] bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
+              <AlertCircle size={14} className="flex-shrink-0" />
+              Ta akcja <strong>modyfikuje dane</strong>. Zostanie zapisana w audycie.
+            </div>
+          )}
+          <Input label="Wartość" value={confirmInput} onChange={e => setConfirmInput(e.target.value)} placeholder={confirmPlaceholder || 'Wpisz wartość'} />
           <div className="flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setConfirmOpen(false)}>Anuluj</Button>
-            <Button variant="primary" onClick={async () => { setConfirmOpen(false); await confirmCb.current(confirmInput); }}>OK</Button>
+            <Button variant={confirmIsMutating ? 'danger' : 'primary'} onClick={async () => { setConfirmOpen(false); await confirmCb.current(confirmInput); }}>OK</Button>
           </div>
         </div>
       </Modal>

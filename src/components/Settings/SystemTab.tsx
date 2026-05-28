@@ -4,17 +4,13 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
-import { check } from '@tauri-apps/plugin-updater';
 import { Power, RefreshCw, Download, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
+
+import { updateClient } from '../../lib/update-client';
+import type { AppUpdateInfo } from '../../lib/update-types';
 
 interface AutostartStatus {
   enabled: boolean;
-}
-
-interface UpdateInfo {
-  version: string;
-  date: string;
-  body: string | null;
 }
 
 type UpdateState = 'idle' | 'checking' | 'available' | 'none' | 'downloading' | 'done' | 'error';
@@ -31,7 +27,7 @@ export default function SystemTab() {
   const [currentVersion, setCurrentVersion] = useState('—');
 
   const [updateState, setUpdateState] = useState<UpdateState>('idle');
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [downloadedBytes, setDownloadedBytes] = useState(0);
   const [totalBytes, setTotalBytes] = useState<number | null>(null);
@@ -71,13 +67,9 @@ export default function SystemTab() {
     setTotalBytes(null);
     setLastChunkBytes(0);
     try {
-      const update = await check();
-      if (update?.available) {
-        setUpdateInfo({
-          version: update.version,
-          date: update.date ?? '—',
-          body: update.body ?? null,
-        });
+      const update = await updateClient.checkForUpdate();
+      if (update) {
+        setUpdateInfo(update);
         setUpdateState('available');
       } else {
         setUpdateState('none');
@@ -95,21 +87,23 @@ export default function SystemTab() {
     setTotalBytes(null);
     setLastChunkBytes(0);
     try {
-      const update = await check();
-      if (update?.available) {
-        await update.downloadAndInstall((event) => {
-          if (event.event === 'Started') {
-            setDownloadedBytes(0);
-            setLastChunkBytes(0);
-            setTotalBytes(event.data.contentLength ?? null);
-            return;
-          }
-          if (event.event === 'Progress') {
-            setLastChunkBytes(event.data.chunkLength);
-            setDownloadedBytes(prev => prev + event.data.chunkLength);
-          }
-        });
+      const update = await updateClient.downloadAndInstallUpdate((progress) => {
+        if (progress.phase === 'started') {
+          setDownloadedBytes(0);
+          setLastChunkBytes(0);
+          setTotalBytes(progress.contentLength);
+          return;
+        }
+
+        setLastChunkBytes(progress.chunkLength);
+        setDownloadedBytes(prev => prev + progress.chunkLength);
+      });
+
+      if (update) {
+        setUpdateInfo(update);
         setUpdateState('done');
+      } else {
+        setUpdateState('none');
       }
     } catch (e: unknown) {
       setUpdateError(e instanceof Error ? e.message : String(e));
@@ -177,7 +171,7 @@ export default function SystemTab() {
           <div>
             <p className="font-semibold text-sm text-[var(--color-text)]">Aktualizacje aplikacji</p>
             <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
-              Sprawdza GitHub Releases — aktualizacje są podpisane kryptograficznie
+              Sprawdza skonfigurowane źródło aktualizacji — może użyć wbudowanego updatera Tauri albo uruchomić instalator pomocniczy
             </p>
           </div>
         </div>
@@ -203,7 +197,9 @@ export default function SystemTab() {
           <div className="mb-3 rounded-lg border border-white/10 bg-white/5 p-3">
             <div className="flex items-center gap-2 text-sm text-white/80">
               <RefreshCw size={14} className="animate-spin" />
-              Pobieranie i instalacja aktualizacji…
+              {updateInfo?.installKind === 'helper'
+                ? 'Pobieranie aktualizacji i uruchamianie instalatora…'
+                : 'Pobieranie i instalacja aktualizacji…'}
             </div>
 
             <div className="mt-3 h-2 overflow-hidden rounded-full bg-black/30">
@@ -225,7 +221,9 @@ export default function SystemTab() {
         {updateState === 'done' && (
           <div className="flex items-center gap-2 text-sm text-green-400 mb-3">
             <CheckCircle2 size={15} />
-            Aktualizacja zainstalowana — uruchom ponownie aplikację
+            {updateInfo?.installKind === 'helper'
+              ? 'Instalator aktualizacji został uruchomiony — zamknij Parking.OS, jeśli instalator o to poprosi.'
+              : 'Aktualizacja zainstalowana — uruchom ponownie aplikację'}
           </div>
         )}
         {updateState === 'error' && updateError && (
@@ -255,7 +253,9 @@ export default function SystemTab() {
                 bg-green-600 hover:bg-green-500 text-white transition-colors"
             >
               <Download size={14} />
-              Pobierz i zainstaluj v{updateInfo?.version}
+              {updateInfo?.installKind === 'helper'
+                ? `Pobierz i uruchom instalator v${updateInfo?.version}`
+                : `Pobierz i zainstaluj v${updateInfo?.version}`}
             </button>
           )}
         </div>

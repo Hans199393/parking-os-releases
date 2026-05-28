@@ -19,6 +19,7 @@ import {
   getBannedVehicles,
   getConfig,
   getConfigs,
+  setConfig,
   getAssistantPromptConfig,
   getAdminLogs,
   getCapacityForDate,
@@ -27,6 +28,12 @@ import {
   getExtraOpenDays,
   getReservationCountByMonth,
   getBotAlerts,
+  deleteReservation,
+  setReservationStatus,
+  markAsNoShow,
+  banVehicle,
+  unbanVehicle,
+  addReservation,
 } from './supabase';
 import {
   getMonthlyRevenue, getMonthlyInvoices, getRecurringMonthlyTotal, getDailyRevenue,
@@ -70,12 +77,12 @@ function parseDate(input?: string): string {
 export const TOOLS: OrzelTool[] = [
   {
     name: 'list_reservations',
-    description: 'Zwraca listę rezerwacji na podany dzień lub zakres dni. Argument `date` może być w formacie YYYY-MM-DD, DD.MM.YYYY albo słowem "dziś"/"jutro"/"wczoraj". Opcjonalny `date_to` zwraca rezerwacje na zakres (włącznie). Bez argumentu = dziś.',
+    description: 'Zwraca listę rezerwacji na podany dzień lub zakres dni. Argument `date` może być w formacie YYYY-MM-DD, DD.MM.YYYY albo słowem "dziś"/"jutro"/"wczoraj". Opcjonalny `date_to` zwraca rezerwacje na zakres (włącznie). Bez argumentu = dziś. WAŻNE: jeśli pytanie dotyczy "całej historii", "wszystkich rezerwacji", "od początku systemu" — użyj date="2020-01-01" i date_to=dziś.',
     parameters: {
       type: 'object',
       properties: {
-        date: { type: 'string', description: 'YYYY-MM-DD lub słowo (dziś/jutro/wczoraj)' },
-        date_to: { type: 'string', description: 'Opcjonalna data końcowa zakresu (YYYY-MM-DD)' },
+        date: { type: 'string', description: 'YYYY-MM-DD lub słowo (dziś/jutro/wczoraj). Dla całej historii: "2020-01-01"' },
+        date_to: { type: 'string', description: 'Opcjonalna data końcowa zakresu (YYYY-MM-DD). Dla całej historii: dziś' },
       },
     },
     run: async ({ date, date_to }: { date?: string; date_to?: string }) => {
@@ -469,11 +476,137 @@ export const TOOLS: OrzelTool[] = [
       };
     },
   },
+
+  // ─── Akcje mutujące (Iter 15) ─────────────────────────────────────────────
+  {
+    name: 'cancel_reservation',
+    description: 'AKCJA: Anuluje (usuwa) rezerwację o podanym ID. WAŻNE: przed wywołaniem ZAWSZE zapytaj operatora o potwierdzenie podając mu szczegóły rezerwacji (tablicę i datę). Wywołaj dopiero gdy powie "tak"/"potwierdź".',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'UUID rezerwacji z wyniku find_reservation lub list_reservations' },
+      },
+      required: ['id'],
+    },
+    mutates: true,
+    run: async ({ id }: { id: string }) => {
+      await deleteReservation(id);
+      void audit('chat', 'orzel_tool', { severity: 'warning', metadata: { tool: 'cancel_reservation', id } });
+      return { success: true, cancelled_id: id, message: 'Rezerwacja anulowana.' };
+    },
+  },
+  {
+    name: 'set_reservation_status',
+    description: 'AKCJA: Zmienia status rezerwacji. Dostępne statusy: active, cancelled, no_show, completed. WAŻNE: przed wywołaniem zapytaj o potwierdzenie.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'UUID rezerwacji' },
+        status: { type: 'string', description: 'Nowy status: active / cancelled / no_show / completed' },
+      },
+      required: ['id', 'status'],
+    },
+    mutates: true,
+    run: async ({ id, status }: { id: string; status: string }) => {
+      await setReservationStatus(id, status);
+      void audit('chat', 'orzel_tool', { severity: 'warning', metadata: { tool: 'set_reservation_status', id, status } });
+      return { success: true, id, new_status: status };
+    },
+  },
+  {
+    name: 'mark_no_show',
+    description: 'AKCJA: Oznacza rezerwację jako no-show i może automatycznie zbanować tablicę jeśli to kolejny no-show. Zwraca { nowBanned: bool }. WAŻNE: zapytaj o potwierdzenie przed wywołaniem.',
+    parameters: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'UUID rezerwacji' },
+        registration: { type: 'string', description: 'Tablica rejestracyjna pojazdu' },
+      },
+      required: ['id', 'registration'],
+    },
+    mutates: true,
+    run: async ({ id, registration }: { id: string; registration: string }) => {
+      const result = await markAsNoShow(id, registration);
+      void audit('chat', 'orzel_tool', { severity: 'warning', metadata: { tool: 'mark_no_show', id, registration, nowBanned: result.nowBanned } });
+      return { success: true, id, registration, nowBanned: result.nowBanned, message: result.nowBanned ? `Oznaczono no-show. Tablica ${registration} została automatycznie zbanowana.` : `Oznaczono no-show.` };
+    },
+  },
+  {
+    name: 'ban_vehicle',
+    description: 'AKCJA: Ręcznie banuje tablicę rejestracyjną. Podaj powód. WAŻNE: zapytaj o potwierdzenie przed wywołaniem.',
+    parameters: {
+      type: 'object',
+      properties: {
+        registration: { type: 'string', description: 'Tablica rejestracyjna, np. GD12345' },
+        reason: { type: 'string', description: 'Powód bana (opcjonalny)' },
+      },
+      required: ['registration'],
+    },
+    mutates: true,
+    run: async ({ registration, reason }: { registration: string; reason?: string }) => {
+      await banVehicle(registration, reason);
+      void audit('chat', 'orzel_tool', { severity: 'warning', metadata: { tool: 'ban_vehicle', registration, reason } });
+      return { success: true, banned: registration, reason: reason ?? '(brak powodu)' };
+    },
+  },
+  {
+    name: 'unban_vehicle',
+    description: 'AKCJA: Usuwa bana dla tablicy rejestracyjnej. WAŻNE: zapytaj o potwierdzenie przed wywołaniem.',
+    parameters: {
+      type: 'object',
+      properties: {
+        registration: { type: 'string', description: 'Tablica rejestracyjna do odbanowania' },
+      },
+      required: ['registration'],
+    },
+    mutates: true,
+    run: async ({ registration }: { registration: string }) => {
+      await unbanVehicle(registration);
+      void audit('chat', 'orzel_tool', { severity: 'warning', metadata: { tool: 'unban_vehicle', registration } });
+      return { success: true, unbanned: registration };
+    },
+  },
+  {
+    name: 'set_spots_available',
+    description: 'AKCJA: Ustawia status dostępności miejsc (wyświetlany na stronie). Wartość "true" = są wolne miejsca, "false" = brak miejsc (wyświetla banner na WWW). WAŻNE: zapytaj o potwierdzenie.',
+    parameters: {
+      type: 'object',
+      properties: {
+        available: { type: 'boolean', description: 'true = są miejsca, false = brak miejsc (pokaż banner)' },
+      },
+      required: ['available'],
+    },
+    mutates: true,
+    run: async ({ available }: { available: boolean }) => {
+      await setConfig('spots_available', available ? 'true' : 'false');
+      void audit('chat', 'orzel_tool', { severity: 'warning', metadata: { tool: 'set_spots_available', available } });
+      return { success: true, spots_available: available, message: available ? 'Status ustawiony: są wolne miejsca.' : 'Status ustawiony: BRAK MIEJSC (banner na WWW aktywny).' };
+    },
+  },
+  {
+    name: 'add_reservation',
+    description: 'AKCJA: Dodaje nową rezerwację. Wymaga daty przyjazdu i tablicy rejestracyjnej. WAŻNE: zapytaj o potwierdzenie przed wywołaniem.',
+    parameters: {
+      type: 'object',
+      properties: {
+        arrival_date: { type: 'string', description: 'Data przyjazdu YYYY-MM-DD lub dziś/jutro' },
+        registration: { type: 'string', description: 'Tablica rejestracyjna pojazdu' },
+      },
+      required: ['arrival_date', 'registration'],
+    },
+    mutates: true,
+    run: async ({ arrival_date, registration }: { arrival_date: string; registration: string }) => {
+      const date = parseDate(arrival_date);
+      const res = await addReservation(date, registration.toUpperCase().replace(/\s+/g, ''));
+      void audit('chat', 'orzel_tool', { severity: 'warning', metadata: { tool: 'add_reservation', arrival_date: date, registration } });
+      return { success: true, id: res.id, arrival_date: date, registration: res.registration };
+    },
+  },
 ];
 
-// ─── OpenAI-compatible client (Groq by default) ─────────────────────────────
+// ─── OpenAI-compatible client (Ollama by default) ───────────────────────────
 
-const DEFAULT_ORZEL_API_BASE_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const DEFAULT_ORZEL_API_BASE_URL = 'http://localhost:11434/v1/chat/completions';
 
 export interface OrzelMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
@@ -628,11 +761,11 @@ interface GroqConfig {
 async function loadConfig(): Promise<GroqConfig | null> {
   const store = await getStore();
   const apiKey = (await store.get<string>('groq_api_key')) ?? '';
-  const model = (await store.get<string>('groq_model')) ?? 'llama-3.3-70b-versatile';
+  const model = (await store.get<string>('groq_model')) ?? 'llama3.1:8b';
   const apiBaseUrl = ((await store.get<string>('orzel_api_base_url')) ?? DEFAULT_ORZEL_API_BASE_URL).trim() || DEFAULT_ORZEL_API_BASE_URL;
   const tempStr = (await store.get<string>('orzel_temperature')) ?? '0.3';
   const temperature = Math.max(0, Math.min(1, parseFloat(tempStr) || 0.3));
-  if (!apiKey) return null;
+  if (!apiKey && apiBaseUrl.includes('groq.com')) return null;
   return { apiKey, model, apiBaseUrl, temperature };
 }
 
@@ -664,7 +797,7 @@ async function callGroq(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${cfg.apiKey}`,
+      ...(cfg.apiKey ? { Authorization: `Bearer ${cfg.apiKey}` } : {}),
     },
     body: JSON.stringify({
       model: model,
@@ -737,9 +870,9 @@ export async function chatTurn(history: OrzelMessage[], userInput: string): Prom
   }
 
   const { prompt: systemPrompt, toolsEnabled } = await getSystemPrompt();
-  // Iter 12-pre: ogranicz history do ostatnich 6 wiadomości (3 pary user/assistant).
-  // To kompromis między zachowaniem kontekstu rozmowy a oszczędnością TPM.
-  const trimmedHistory = history.slice(-6);
+  // Ogranicz history do ostatnich 20 wiadomości (10 par user/assistant).
+  // Ollama lokalne — brak limitów TPM, więcej kontekstu to lepszy asystent.
+  const trimmedHistory = history.slice(-20);
   const messages: OrzelMessage[] = [
     { role: 'system', content: systemPrompt },
     ...trimmedHistory,

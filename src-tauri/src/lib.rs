@@ -1,5 +1,5 @@
 use bcrypt::{hash, verify, DEFAULT_COST};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use base64::Engine;
 use std::sync::{Arc, Mutex};
 use std::process::Child;
@@ -9,7 +9,8 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{Read, Write};
+use std::time::Duration;
 
 const DEV_FFMPEG_PATH: &str = r"G:\parking_2026\ffmpeg-8.1-essentials_build\bin\ffmpeg.exe";
 const CAMERA_PROXY_LOG_FILE: &str = "camera-proxy.log";
@@ -39,6 +40,22 @@ struct ProxyHealthPayload {
     #[serde(default)]
     cameras: Vec<ProxyHealthCamera>,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HelperUpdateLaunchResult {
+    file_path: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct HelperUpdateProgressPayload {
+    phase: String,
+    content_length: Option<u64>,
+    chunk_length: u64,
+}
+
+const HELPER_UPDATE_PROGRESS_EVENT: &str = "helper-update-progress";
 
 enum ExistingProxyState {
     None,
@@ -959,6 +976,57 @@ fn detector_is_running(state: tauri::State<'_, DetectorProcess>) -> bool {
 // ─── PWA server process management ──────────────────────────────────────────
 pub struct PwaServer(pub Arc<Mutex<Option<Child>>>);
 
+// ─── Ollama process management ───────────────────────────────────────────────
+pub struct OllamaProcess(pub Arc<Mutex<Option<Child>>>);
+
+#[tauri::command]
+fn start_ollama(state: tauri::State<'_, OllamaProcess>) -> Result<String, String> {
+    let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+    if let Some(child) = guard.as_mut() {
+        if matches!(child.try_wait(), Ok(None)) {
+            return Ok("already_running".to_string());
+        }
+    }
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    let mut cmd = std::process::Command::new("ollama");
+    cmd.arg("serve");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    match cmd.spawn() {
+        Ok(child) => {
+            *guard = Some(child);
+            Ok("started".to_string())
+        }
+        Err(e) => Err(format!("Nie można uruchomić ollama serve: {}", e)),
+    }
+}
+
+#[tauri::command]
+fn stop_ollama(state: tauri::State<'_, OllamaProcess>) -> Result<(), String> {
+    let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+    if let Some(mut child) = guard.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn ollama_is_running(state: tauri::State<'_, OllamaProcess>) -> bool {
+    if let Ok(mut guard) = state.0.lock() {
+        if let Some(child) = guard.as_mut() {
+            return matches!(child.try_wait(), Ok(None));
+        }
+    }
+    false
+}
+
 // ─── RTSP→HLS proxy process management ───────────────────────────────────────
 pub struct ProxyProcess(pub Arc<Mutex<Option<Child>>>);
 
@@ -1361,10 +1429,173 @@ async fn app_restart(app: AppHandle) {
     app.restart();
 }
 
+fn helper_updates_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?;
+    Ok(app_data_dir.join("helper-updates"))
+}
+
+fn sanitize_helper_file_name(raw: &str, version: &str) -> String {
+    let sanitized: String = raw
+        .trim()
+        .chars()
+        .map(|ch| match ch {
+            '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+
+    if sanitized.is_empty() {
+        format!("Parking.OS_{}_helper-update.exe", version)
+    } else {
+        sanitized
+    }
+}
+
+fn helper_file_name(url: &str, version: &str, file_name: Option<&str>) -> String {
+    if let Some(file_name) = file_name {
+        let normalized = sanitize_helper_file_name(file_name, version);
+        if !normalized.is_empty() {
+            return normalized;
+        }
+    }
+
+    let candidate = url
+        .split('#')
+        .next()
+        .unwrap_or(url)
+        .split('?')
+        .next()
+        .unwrap_or(url)
+        .rsplit('/')
+        .next()
+        .unwrap_or("");
+
+    sanitize_helper_file_name(candidate, version)
+}
+
+#[cfg(windows)]
+fn launch_helper_installer(path: &Path) -> Result<(), String> {
+    let normalized = normalize_runtime_path(path);
+    let installer = normalized.to_string_lossy().to_string();
+    let working_dir = normalized
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    std::process::Command::new("cmd")
+        .arg("/C")
+        .arg("start")
+        .arg("")
+        .arg(installer)
+        .current_dir(working_dir)
+        .spawn()
+        .map_err(|e| format!("Nie udało się uruchomić instalatora: {}", e))?;
+
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn launch_helper_installer(path: &Path) -> Result<(), String> {
+    std::process::Command::new(path)
+        .spawn()
+        .map_err(|e| format!("Nie udało się uruchomić instalatora: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn helper_update_download_and_launch_installer(
+    app: AppHandle,
+    url: String,
+    version: String,
+    file_name: Option<String>,
+) -> Result<HelperUpdateLaunchResult, String> {
+    let updates_dir = helper_updates_dir(&app)?;
+
+    tokio::task::spawn_blocking(move || {
+        std::fs::create_dir_all(&updates_dir)
+            .map_err(|e| format!("Nie udało się utworzyć katalogu aktualizacji: {}", e))?;
+
+        let resolved_file_name = helper_file_name(&url, &version, file_name.as_deref());
+        let installer_path = updates_dir.join(resolved_file_name);
+
+        let client = reqwest::blocking::Client::builder()
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .timeout(Duration::from_secs(600))
+            .build()
+            .map_err(|e| format!("Nie udało się utworzyć klienta updatera: {}", e))?;
+
+        let mut response = client
+            .get(&url)
+            .header(reqwest::header::USER_AGENT, "Parking.OS Helper Updater")
+            .send()
+            .map_err(|e| format!("Błąd pobierania instalatora: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!(
+                "Serwer zwrócił błąd podczas pobierania instalatora: {}",
+                response.status()
+            ));
+        }
+
+        let mut file = std::fs::File::create(&installer_path)
+            .map_err(|e| format!("Nie udało się utworzyć pliku instalatora: {}", e))?;
+
+        let content_length = response.content_length();
+        let _ = app.emit(
+            HELPER_UPDATE_PROGRESS_EVENT,
+            HelperUpdateProgressPayload {
+                phase: "started".to_string(),
+                content_length,
+                chunk_length: 0,
+            },
+        );
+
+        let mut buffer = [0_u8; 64 * 1024];
+
+        loop {
+            let read = response
+                .read(&mut buffer)
+                .map_err(|e| format!("Błąd odczytu instalatora: {}", e))?;
+
+            if read == 0 {
+                break;
+            }
+
+            file.write_all(&buffer[..read])
+                .map_err(|e| format!("Błąd zapisu instalatora: {}", e))?;
+
+            let _ = app.emit(
+                HELPER_UPDATE_PROGRESS_EVENT,
+                HelperUpdateProgressPayload {
+                    phase: "progress".to_string(),
+                    content_length,
+                    chunk_length: read as u64,
+                },
+            );
+        }
+
+        drop(file);
+
+        launch_helper_installer(&installer_path)?;
+
+        Ok(HelperUpdateLaunchResult {
+            file_path: installer_path.to_string_lossy().to_string(),
+        })
+    })
+    .await
+    .map_err(|e| format!("Wątek helper updatera zakończył się błędem: {}", e))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(PwaServer(Arc::new(Mutex::new(None))))
+        .manage(OllamaProcess(Arc::new(Mutex::new(None))))
         .manage(DetectorProcess(Arc::new(Mutex::new(None))))
         .manage(ProxyProcess(Arc::new(Mutex::new(None))))
         .setup(|app| {
@@ -1435,7 +1666,11 @@ pub fn run() {
             db_get_meta,
             autostart_get_status,
             autostart_set,
+            helper_update_download_and_launch_installer,
             app_restart,
+            start_ollama,
+            stop_ollama,
+            ollama_is_running,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

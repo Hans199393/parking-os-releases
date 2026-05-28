@@ -34,7 +34,7 @@ export const ALL_SETTINGS_KEYS = [
   // Messenger / panel WWW
   'authorized_psids',
   // AI Asystent (Orzeł) — lokalny czat z function calling
-  'groq_api_key', 'groq_model', 'orzel_temperature',
+  'groq_api_key', 'groq_model', 'orzel_api_base_url', 'orzel_temperature',
   // Rozszerzony tryb desktopowy: pozwala na swobodne zapytania (tylko desktop)
   'orzel_expanded_mode',
   // Konfigurowalne przyciski quick-action w panelu Orła (CSV nazw narzędzi)

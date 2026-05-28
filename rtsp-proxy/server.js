@@ -43,7 +43,7 @@ const cameras = [
 
 if (cameras.length === 0) {
   console.error('Brak skonfigurowanych kamer. Ustaw zmienne środowiskowe CAM1_RTSP, CAM2_RTSP, CAM3_RTSP.');
-  console.error('Przykład: CAM1_RTSP=rtsp://admin:haslo@192.168.0.50:554/cam/realmonitor?channel=1&subtype=0');
+  console.error('Przykład: CAM1_RTSP=rtsp://admin:TWOJE_HASLO@192.168.0.50:554/cam/realmonitor?channel=1&subtype=0');
   process.exit(1);
 }
 

@@ -73,7 +73,7 @@ function Field({ label, value, onChange, placeholder, type = 'text', mono = fals
       <div className="relative">
         <input
           type={showMaskedValue ? 'text' : (isPassword && !reveal ? 'password' : 'text')}
-          value={showMaskedValue ? '************' : value}
+          value={showMaskedValue ? '••••••••••••' : value}
           onChange={e => { if (!disabled && !showMaskedValue) onChange(e.target.value); }} placeholder={placeholder}
           disabled={disabled || showMaskedValue}
           className={`w-full px-3.5 py-2.5 ${(isPassword && !showMaskedValue) ? 'pr-10' : ''} rounded-[var(--radius-md)] border-2 border-[var(--color-border)] bg-transparent text-[var(--color-text)] text-sm transition-all hover:border-[var(--color-border-strong)] focus:outline-none focus:border-[var(--color-accent)] disabled:opacity-70 disabled:cursor-not-allowed ${mono ? 'font-mono' : ''}`}
@@ -249,7 +249,7 @@ export default function IntegrationsTab({ values, set }: Props) {
         <Lock size={20} className="text-[var(--color-warning)] flex-shrink-0" />
         <div>
           <p className="text-sm font-bold text-[var(--color-text)]">Tryb tylko do odczytu</p>
-          <p className="text-xs text-[var(--color-text-muted)]">Brak uprawnienia <code>settings.edit_integrations</code> — zmiany nie zostaną zapisane.</p>
+          <p className="text-xs text-[var(--color-text-muted)]">Brak uprawnienia <code>settings.edit_integrations</code> — sekrety są ukryte, a zmiany nie zostaną zapisane.</p>
         </div>
       </div>
     )}
@@ -414,16 +414,19 @@ export default function IntegrationsTab({ values, set }: Props) {
           </div>
           <div>
             <h3 className="text-lg font-bold text-[var(--color-text)]">AI Asystent (Orzeł)</h3>
-            <p className="text-xs text-[var(--color-text-muted)]">Klucz Groq do lokalnego czatu z function calling</p>
+            <p className="text-xs text-[var(--color-text-muted)]">Ollama (lokalny, RODO-safe) lub inny endpoint OpenAI-compatible do czatu z function calling</p>
           </div>
         </div>
         <div className="space-y-3">
-          <Field label="GROQ_API_KEY" type="password" value={values.groq_api_key ?? ''} onChange={v => setG('groq_api_key', v)} disabled={!canEdit} masked={!canEdit}
-            placeholder="gsk_..." mono
-            hint="Pobierz darmowy klucz: https://console.groq.com/keys" />
-          <Field label="Model" value={values.groq_model ?? 'llama-3.3-70b-versatile'} onChange={v => setG('groq_model', v)}
-            placeholder="llama-3.3-70b-versatile" mono
-            hint="🔥 llama-3.3-70b-versatile (najlepsze tools, ale TPM 12k) lub llama-3.1-8b-instant (TPM 30k, szybsze, prostsze tools)" />
+          <Field label="Endpoint API (OpenAI-compatible)" value={values.orzel_api_base_url ?? 'http://localhost:11434/v1/chat/completions'} onChange={v => setG('orzel_api_base_url', v)}
+            placeholder="http://localhost:11434/v1/chat/completions" mono
+            hint="Ollama (lokalne): http://localhost:11434/v1/chat/completions. Groq (chmura): https://api.groq.com/openai/v1/chat/completions. OpenRouter: https://openrouter.ai/api/v1/chat/completions" />
+          <Field label="API Key (opcjonalny — Ollama nie wymaga)" type="password" value={values.groq_api_key ?? ''} onChange={v => setG('groq_api_key', v)} disabled={!canEdit} masked={!canEdit}
+            placeholder="puste = Ollama bez klucza  /  gsk_... = Groq" mono
+            hint="Ollama lokalne: zostaw puste. Groq: https://console.groq.com/keys. OpenRouter: sk-or-..." />
+          <Field label="Model" value={values.groq_model ?? 'llama3.1:8b'} onChange={v => setG('groq_model', v)}
+            placeholder="llama3.1:8b" mono
+            hint="Ollama (zalecane RTX 3050): llama3.1:8b, qwen2.5:7b, mistral:7b. Groq: llama-3.3-70b-versatile. OpenRouter: meta-llama/llama-3.3-70b-instruct" />
           <Field label="Temperatura (0.0–1.0)" value={values.orzel_temperature ?? '0.3'} onChange={v => setG('orzel_temperature', v)}
             placeholder="0.3" mono
             hint="Niższa = bardziej deterministyczne odpowiedzi (zalecane 0.2–0.4)" />
@@ -451,8 +454,9 @@ export default function IntegrationsTab({ values, set }: Props) {
           </div>
         </div>
         <p className="text-[10px] text-[var(--color-text-muted)] opacity-70 mt-3 leading-relaxed">
-          Orzeł umie: <strong>list_reservations</strong>, <strong>find_reservation</strong>, <strong>check_capacity</strong>, <strong>list_banned_vehicles</strong>, <strong>get_parking_info</strong>.
-          Każde wywołanie narzędzia jest logowane do audytu.
+          Orzeł umie: <strong>list_reservations</strong>, <strong>find_reservation</strong>, <strong>check_capacity</strong>, <strong>list_banned_vehicles</strong>, <strong>get_parking_info</strong>, <strong>get_finance_summary</strong>, <strong>get_week_overview</strong>, <strong>get_reservation_stats</strong> i więcej (22 tools).
+          Akcje mutujące (ban, anuluj, no-show, status): wymagają potwierdzenia operatora.
+          Każde wywołanie jest logowane do audytu. Dane nie opuszczają sieci lokalnej (Ollama).
         </p>
       </div>
 
