@@ -628,7 +628,8 @@ export async function getReservationCountByMonth(year: number, month: number): P
     .from('reservations')
     .select('arrival_date')
     .filter('arrival_date', 'like', `%.${mm}.${year}`)
-    .eq('status', 'confirmed');
+    .eq('status', 'confirmed')
+    .is('deleted_at' as never, null);
   if (error) throw error;
   const counts: Record<string, number> = {};
   for (const r of data ?? []) {

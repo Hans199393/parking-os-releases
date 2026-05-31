@@ -699,7 +699,7 @@ export default function Finances() {
   const [tab, setTab] = useState<'revenues' | 'invoices' | 'stats' | 'raport-d' | 'raport-m' | 'raport-r' | 'all-time' | 'raport-w' | 'prognoza' | 'pogoda' | 'sezony' | 'kpi' | 'koszty-cykliczne'>('revenues');
   type TabGroup = 'wpisy' | 'raporty' | 'analizy' | 'koszty';
   const TAB_GROUPS: { group: TabGroup; label: string; tabs: [typeof tab, string][] }[] = [
-    { group: 'wpisy', label: '📝 Wpisy', tabs: [['revenues', 'Przychody'], ['invoices', 'Faktury'], ['stats', 'Wykres']] },
+    { group: 'wpisy', label: '📝 Wpisy', tabs: [['revenues', 'Przychody & Faktury'], ['stats', 'Wykres']] },
     { group: 'koszty', label: '💸 Koszty', tabs: [['koszty-cykliczne', 'Cykliczne'], ['kpi', 'Dashboard KPI']] },
     { group: 'raporty', label: '📊 Raporty', tabs: [['raport-d', 'Dzień'], ['raport-w', 'Tydzień'], ['raport-m', 'Miesiąc'], ['raport-r', 'Rok'], ['all-time', 'Cały parking']] },
     { group: 'analizy', label: '🔬 Analizy', tabs: [['prognoza', 'Prognoza'], ['pogoda', 'Pogoda'], ['sezony', 'Sezony']] },
@@ -888,34 +888,37 @@ export default function Finances() {
         </div>
       </div>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-5 gap-3 mb-5 flex-shrink-0">
-        <Card className="text-center py-3">
-          <p className="text-slate-500 text-xs mb-1">Przychody</p>
-          <p className="text-xl font-bold text-teal-400">{formatPLN(totalRevenue)}</p>
-        </Card>
-        <Card className="text-center py-3">
-          <p className="text-slate-500 text-xs mb-1">Koszty oper.</p>
-          <p className="text-xl font-bold text-orange-400">{formatPLN(totalOperationalCosts)}</p>
-        </Card>
-        <Card className="text-center py-3">
-          <p className="text-slate-500 text-xs mb-1">Inwestycje</p>
-          <p className="text-xl font-bold text-purple-400">{formatPLN(totalInvestmentCosts)}</p>
-        </Card>
-        <Card className="text-center py-3 border border-green-500/20">
-          <p className="text-slate-500 text-xs mb-1">Zysk na czysto</p>
-          <p className={`text-xl font-bold ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatPLN(profit)}</p>
-          <p className="text-[10px] text-slate-600 mt-0.5">po wszystkich kosztach</p>
-        </Card>
-        <Card className="text-center py-3 border border-purple-500/30">
-          <p className="text-slate-500 text-xs mb-1">Do zwrotu inwest.</p>
+      {/* Summary strip */}
+      <div className="glass-strong rounded-[var(--radius-lg)] px-5 py-3 mb-4 flex-shrink-0 flex items-center gap-0">
+        <div className="flex-1 text-center">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-0.5">Przychody</p>
+          <p className="text-lg font-bold text-teal-400 tabular-nums">{formatPLN(totalRevenue)}</p>
+        </div>
+        <div className="w-px h-8 bg-[var(--color-border)] mx-2 flex-shrink-0" />
+        <div className="flex-1 text-center">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-0.5">Koszty oper.</p>
+          <p className="text-lg font-bold text-orange-400 tabular-nums">{formatPLN(totalOperationalCosts)}</p>
+        </div>
+        <div className="w-px h-8 bg-[var(--color-border)] mx-2 flex-shrink-0" />
+        <div className="flex-1 text-center">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-0.5">Inwestycje</p>
+          <p className="text-lg font-bold text-purple-400 tabular-nums">{formatPLN(totalInvestmentCosts)}</p>
+        </div>
+        <div className="w-px h-8 bg-[var(--color-border)] mx-2 flex-shrink-0" />
+        <div className="flex-1 text-center">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-0.5">Zysk netto</p>
+          <p className={`text-lg font-bold tabular-nums ${profit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{formatPLN(profit)}</p>
+        </div>
+        <div className="w-px h-8 bg-[var(--color-border)] mx-2 flex-shrink-0" />
+        <div className="flex-1 text-center">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500 mb-0.5">Do zwrotu inwest.</p>
           {totalInvestments === 0
-            ? <p className="text-sm text-slate-600">Brak inwestycji</p>
+            ? <p className="text-sm text-slate-600">—</p>
             : roiRemaining === 0
-              ? <p className="text-sm font-bold text-green-400">Spłacona! 🎉</p>
-              : <p className="text-sm font-bold text-purple-400">{formatPLN(roiRemaining)}</p>
+              ? <p className="text-lg font-bold text-green-400">Spłacona!</p>
+              : <p className="text-lg font-bold text-purple-400 tabular-nums">{formatPLN(roiRemaining)}</p>
           }
-        </Card>
+        </div>
       </div>
 
       {/* Tab Groups */}
@@ -961,68 +964,117 @@ export default function Finances() {
             <Button variant="secondary" size="sm" onClick={load}>Spróbuj ponownie</Button>
           </div>
         ) : tab === 'revenues' ? (
-          <div>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-slate-500 text-xs border-b border-slate-700">
-                  <th className="text-left py-2 pl-2">Data</th>
-                  <th className="text-right py-2">DO SEJFU</th>
-                  <th className="text-right py-2">Karta</th>
-                  <th className="text-right py-2">BLIK</th>
-                  <th className="text-right py-2">Razem</th>
-                  <th className="text-right py-2">Auta</th>
-                  <th className="text-center py-2">Pogoda</th>
-                  <th className="py-2 w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {revenues.length === 0 ? (
-                  <tr><td colSpan={8} className="text-center text-slate-500 py-10">Brak danych za ten miesiąc</td></tr>
-                ) : revenues.map(r => {
-                  return (
-                    <tr
-                      key={r.date}
-                      className="border-b border-slate-800 hover:bg-slate-800 cursor-pointer transition-colors group"
-                      onClick={() => openRevModal(r.date)}
-                    >
-                      <td className="py-2.5 pl-2 text-white font-medium">{r.date}</td>
-                      <td className="text-right py-2.5 text-teal-300 font-semibold">{formatPLN(r.do_sejfu ?? 0)}</td>
-                      <td className="text-right py-2.5 text-slate-300">{formatPLN(r.card)}</td>
-                      <td className="text-right py-2.5 text-slate-300">{formatPLN(r.blik)}</td>
-                      <td className="text-right py-2.5 text-teal-400 font-semibold">{formatPLN(r.total ?? 0)}</td>
-                      <td className="text-right py-2.5 text-yellow-400">{r.estimated_cars ?? 0}</td>
-                      <td className="text-center py-2.5 text-base">
-                        {r.weather === 'sunny' ? '☀️' : r.weather === 'cloudy' ? '🌤️' : r.weather === 'rainy' ? '🌧️' : r.weather === 'stormy' ? '⛈️' : ''}
-                        {r.temperature != null ? <span className="text-xs text-slate-400 ml-1">{r.temperature}°</span> : null}
-                      </td>
-                      <td className="py-2.5 pr-1">
-                        <div className="flex justify-end opacity-0 group-hover:opacity-100">
-                          {perm.has('finances.delete') && (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setDeleteRevDate(r.date); setDeleteRevPwd(''); setDeleteRevError(''); }}
-                              className="text-slate-400 hover:text-red-400 p-1 rounded"
-                              title="Usuń raport"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
+          <div className="flex gap-5 h-full min-h-0">
+            {/* Przychody dzienne — szersza kolumna */}
+            <div className="flex-[3] flex flex-col min-h-0">
+              <div className="flex items-center justify-between mb-3 flex-shrink-0">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Przychody dzienne</h3>
+                <button
+                  onClick={() => {
+                    const lastDay = new Date(year, month, 0).getDate();
+                    const day = Math.min(new Date().getDate(), lastDay);
+                    openRevModal(`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-500/10 text-teal-400 text-xs font-semibold hover:bg-teal-500/20 transition-colors"
+                >
+                  <Plus size={13} /> Dodaj dzień
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-[var(--color-bg)] z-10">
+                    <tr className="text-slate-500 text-xs border-b border-slate-700">
+                      <th className="text-left py-2 pl-2">Data</th>
+                      <th className="text-right py-2">Sejf</th>
+                      <th className="text-right py-2">Karta</th>
+                      <th className="text-right py-2">BLIK</th>
+                      <th className="text-right py-2">Razem</th>
+                      <th className="text-right py-2">Auta</th>
+                      <th className="text-center py-2">Pogoda</th>
+                      <th className="py-2 w-8"></th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-            <button
-              onClick={() => {
-                const lastDay = new Date(year, month, 0).getDate();
-                const day = Math.min(new Date().getDate(), lastDay);
-                openRevModal(`${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`);
-              }}
-              className="mt-4 w-full py-3 border border-dashed border-slate-700 text-slate-500 text-sm rounded-xl hover:border-teal-500/50 hover:text-teal-400 transition-colors flex items-center justify-center gap-2"
-            >
-              <Plus size={16} /> Dodaj/edytuj dzień
-            </button>
+                  </thead>
+                  <tbody>
+                    {revenues.length === 0 ? (
+                      <tr><td colSpan={8} className="text-center text-slate-500 py-10">Brak danych za ten miesiąc</td></tr>
+                    ) : revenues.map(r => (
+                      <tr
+                        key={r.date}
+                        className="border-b border-slate-800 hover:bg-slate-800/60 cursor-pointer transition-colors group"
+                        onClick={() => openRevModal(r.date)}
+                      >
+                        <td className="py-2.5 pl-2 text-white font-medium">{r.date}</td>
+                        <td className="text-right py-2.5 text-teal-300 font-semibold">{formatPLN(r.do_sejfu ?? 0)}</td>
+                        <td className="text-right py-2.5 text-slate-300">{formatPLN(r.card)}</td>
+                        <td className="text-right py-2.5 text-slate-300">{formatPLN(r.blik)}</td>
+                        <td className="text-right py-2.5 text-teal-400 font-semibold">{formatPLN(r.total ?? 0)}</td>
+                        <td className="text-right py-2.5 text-yellow-400">{r.estimated_cars ?? 0}</td>
+                        <td className="text-center py-2.5 text-base">
+                          {r.weather === 'sunny' ? '☀️' : r.weather === 'cloudy' ? '🌤️' : r.weather === 'rainy' ? '🌧️' : r.weather === 'stormy' ? '⛈️' : ''}
+                          {r.temperature != null ? <span className="text-xs text-slate-400 ml-1">{r.temperature}°</span> : null}
+                        </td>
+                        <td className="py-2.5 pr-1">
+                          <div className="flex justify-end opacity-0 group-hover:opacity-100">
+                            {perm.has('finances.delete') && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setDeleteRevDate(r.date); setDeleteRevPwd(''); setDeleteRevError(''); }}
+                                className="text-slate-400 hover:text-red-400 p-1 rounded"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Separator */}
+            <div className="w-px bg-[var(--color-border)] flex-shrink-0" />
+
+            {/* Faktury / Wydatki — węższa kolumna */}
+            <div className="flex-[2] flex flex-col min-h-0">
+              <div className="flex items-center justify-between mb-3 flex-shrink-0">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Faktury / Wydatki</h3>
+                {perm.has('finances.add_expense') && (
+                  <button
+                    onClick={() => { setInvEditItem(null); setInvModalOpen(true); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-orange-500/10 text-orange-400 text-xs font-semibold hover:bg-orange-500/20 transition-colors"
+                  >
+                    <Plus size={13} /> Dodaj fakturę
+                  </button>
+                )}
+              </div>
+              <div className="flex-1 overflow-y-auto space-y-1.5">
+                {invoices.length === 0 ? (
+                  <div className="text-center text-slate-500 py-10 text-sm">Brak faktur za ten miesiąc</div>
+                ) : invoices.map(inv => (
+                  <div key={inv.id} className="group flex items-center gap-3 px-3 py-2.5 rounded-xl border border-slate-800 hover:border-slate-700 hover:bg-slate-800/40 transition-all">
+                    <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                      inv.category === 'Podatki'   ? 'bg-orange-400' :
+                      inv.category === 'Usługi'    ? 'bg-teal-400' :
+                      inv.category === 'Inwestycja'? 'bg-purple-400' : 'bg-yellow-400'
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-white truncate">{inv.name}</p>
+                      <p className="text-[10px] text-slate-500">{inv.date} · {inv.category}</p>
+                    </div>
+                    <span className="text-sm font-bold text-red-400 tabular-nums flex-shrink-0">{formatPLN(inv.amount)}</span>
+                    <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                      {perm.has('finances.edit') && (
+                        <button onClick={() => { setInvEditItem(inv); setInvModalOpen(true); }} className="text-slate-400 hover:text-teal-400 p-1 rounded"><Pencil size={12} /></button>
+                      )}
+                      {perm.has('finances.delete') && (
+                        <button onClick={() => setDeleteInvId(inv.id!)} className="text-slate-400 hover:text-red-400 p-1 rounded"><Trash2 size={12} /></button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         ) : tab === 'raport-d' ? (
           <DailyReport

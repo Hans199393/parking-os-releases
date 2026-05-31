@@ -235,8 +235,6 @@ export default function Reservations({ onBadgeChange }: ReservationsProps) {
     try {
       const data = await getReservationCountByMonth(year, month);
       setCounts(data);
-      const total = Object.values(data).reduce((s, c) => s + c, 0);
-      onBadgeChange?.(total);
     } catch (err: unknown) {
       setCounts({});
       setConfigError(err instanceof Error ? err.message : 'Błąd połączenia z bazą danych');
@@ -594,27 +592,50 @@ export default function Reservations({ onBadgeChange }: ReservationsProps) {
         </div>
       </div>
 
-      {/* Tabs — styl Settings glass */}
-      <div className="glass-strong rounded-[var(--radius-lg)] p-2 mb-4 flex-shrink-0 flex gap-1.5 flex-wrap w-fit">
-        <TabButton active={tab === 'calendar'} onClick={() => setTab('calendar')} icon={<Calendar size={15} />} label="Kalendarz" />
-        <TabButton active={tab === 'history'}  onClick={() => setTab('history')}  icon={<History size={15} />}  label="Historia" />
-        <TabButton
-          active={tab === 'blacklist'}
-          onClick={() => setTab('blacklist')}
-          icon={<Ban size={15} />}
-          label="Czarna lista"
-          badge={bannedCount > 0 ? bannedCount : undefined}
-          badgeColor="bg-red-500"
-        />
-        <TabButton
-          active={tab === 'waitlist'}
-          onClick={() => { setTab('waitlist'); loadWaitlist(); }}
-          icon={<Clock size={15} />}
-          label="Oczekujący"
-          badge={waitlist.filter(w => w.status === 'waiting').length || undefined}
-          badgeColor="bg-amber-500"
-        />
-        <TabButton active={tab === 'logs'} onClick={() => setTab('logs')} icon={<ScrollText size={15} />} label="Logi" />
+      {/* Tabs — 3 główne + pod-zakładki Zarządzania */}
+      <div className="glass-strong rounded-[var(--radius-lg)] p-2 mb-4 flex-shrink-0 flex flex-col gap-1.5 w-fit">
+        <div className="flex gap-1.5">
+          <TabButton active={tab === 'calendar'} onClick={() => setTab('calendar')} icon={<Calendar size={15} />} label="Kalendarz" />
+          <TabButton
+            active={['history','blacklist','waitlist'].includes(tab)}
+            onClick={() => { if (!['history','blacklist','waitlist'].includes(tab)) setTab('history'); }}
+            icon={<History size={15} />}
+            label="Zarządzanie"
+            badge={bannedCount > 0 ? bannedCount : undefined}
+            badgeColor="bg-red-500"
+          />
+          <TabButton active={tab === 'logs'} onClick={() => setTab('logs')} icon={<ScrollText size={15} />} label="Logi" />
+        </div>
+        {/* Pod-zakładki Zarządzania */}
+        {['history','blacklist','waitlist'].includes(tab) && (
+          <div className="flex gap-1 pt-1 border-t border-[var(--color-border)]">
+            <button
+              onClick={() => setTab('history')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-colors
+                ${tab === 'history' ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)] border border-[var(--color-accent-border)]' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
+            >
+              <History size={12} /> Historia
+            </button>
+            <button
+              onClick={() => setTab('blacklist')}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-colors
+                ${tab === 'blacklist' ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)] border border-[var(--color-accent-border)]' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
+            >
+              <Ban size={12} /> Czarna lista
+              {bannedCount > 0 && <span className="text-[9px] font-bold px-1.5 rounded-full bg-red-500 text-white">{bannedCount}</span>}
+            </button>
+            <button
+              onClick={() => { setTab('waitlist'); loadWaitlist(); }}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold transition-colors
+                ${tab === 'waitlist' ? 'bg-[var(--color-accent-bg)] text-[var(--color-accent)] border border-[var(--color-accent-border)]' : 'text-slate-500 hover:text-white hover:bg-slate-800'}`}
+            >
+              <Clock size={12} /> Oczekujący
+              {waitlist.filter(w => w.status === 'waiting').length > 0 && (
+                <span className="text-[9px] font-bold px-1.5 rounded-full bg-amber-500 text-white">{waitlist.filter(w => w.status === 'waiting').length}</span>
+              )}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Config warning */}
@@ -766,32 +787,35 @@ export default function Reservations({ onBadgeChange }: ReservationsProps) {
                   </button>
                 </div>
               ) : (
-                <div className="flex-1 overflow-y-auto space-y-2">
+                <div className="flex-1 overflow-y-auto space-y-1.5">
                   {[...dayReservations]
                     .sort((a, b) => (a.status !== 'confirmed' ? 1 : 0) - (b.status !== 'confirmed' ? 1 : 0))
-                    .map((r, idx) => (
-                      <div key={r.id} className={`flex flex-col gap-1 rounded-lg px-3 py-2 border group transition-colors
-                        ${r.status !== 'confirmed' ? 'bg-slate-900/50 border-slate-800 opacity-60' : 'bg-slate-900 border-slate-700 hover:border-slate-600'}`}>
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-500 w-5 flex-shrink-0">{idx + 1}.</span>
-                          <span className={`flex-1 text-sm font-mono font-semibold tracking-wider ${r.status !== 'confirmed' ? 'line-through text-slate-500' : 'text-white'}`}>
+                    .map(r => (
+                      <div key={r.id} className={`group relative rounded-xl p-3 border transition-all
+                        ${r.status !== 'confirmed' ? 'bg-slate-900/20 border-slate-800/40 opacity-50' : 'bg-slate-800/50 border-slate-700/50 hover:border-teal-500/30 hover:bg-slate-800/80'}`}>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className={`font-mono font-bold text-base tracking-widest leading-none ${r.status !== 'confirmed' ? 'line-through text-slate-600' : 'text-white'}`}>
                             {r.registration}
                           </span>
-                          {/* Badge zbanowany */}
-                          {bans.some(b => b.registration === r.registration && b.is_banned) && (
-                            <span className="flex items-center gap-0.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400 flex-shrink-0">
-                              <Ban size={8} /> BAN
-                            </span>
-                          )}
-                          <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${STATUS_COLORS[r.status] ?? 'bg-slate-700 text-slate-300'}`}>
-                            {STATUS_LABELS[r.status] ?? r.status}
-                          </span>
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex items-center gap-1.5">
+                            {bans.some(b => b.registration === r.registration && b.is_banned) && (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-red-500/20 text-red-400">BAN</span>
+                            )}
+                            <span className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                              r.status === 'confirmed' ? 'bg-teal-400' :
+                              r.status === 'completed' ? 'bg-emerald-400' :
+                              r.status === 'no_show'   ? 'bg-orange-400' : 'bg-slate-500'
+                            }`} />
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-slate-500">{STATUS_LABELS[r.status] ?? r.status}</span>
+                          <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                             {perm.has('reservations.edit') && (
-                              <button onClick={() => openEdit(r)} className="text-slate-400 hover:text-teal-400 p-1 rounded"><Pencil size={13} /></button>
+                              <button onClick={() => openEdit(r)} className="text-slate-400 hover:text-teal-400 p-1 rounded"><Pencil size={11} /></button>
                             )}
                             {perm.has('reservations.delete') && (
-                              <button onClick={() => setDeleteId(r.id)} className="text-slate-400 hover:text-red-400 p-1 rounded"><Trash2 size={13} /></button>
+                              <button onClick={() => setDeleteId(r.id)} className="text-slate-400 hover:text-red-400 p-1 rounded"><Trash2 size={11} /></button>
                             )}
                           </div>
                         </div>

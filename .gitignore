@@ -40,3 +40,7 @@ rtsp-proxy/.env
 src-tauri/target/
 src-tauri/gen/schemas/
 
+
+rtsp-proxy/hls_output/
+
+downloads/

@@ -1,0 +1,15 @@
+{
+    "version":  "2026.1.11",
+    "notes":  "Parking.OS 2026.1.11",
+    "pub_date":  "2026-05-28T19:04:51Z",
+    "platforms":  {
+                      "windows-x86_64-nsis":  {
+                                                  "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTdUtveUZCaTdyQnQzWXBtVmhSMlpWOFlIbjRLN3hIRVZPRm9KcU1ac21IekxxRjZPVmxMNkpFZE5MbkpicWlvaVVSMmtVZjhGR0o0NklUbWZubWV3SS9BNC80akdUVVFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc5OTg5NDMxCWZpbGU6UGFya2luZy5PU18yMDI2LjEuMTFfeDY0LXNldHVwLm5zaXMuemlwCk0xWDZLVEVpSnhUU3lYcXdnYUpmUzMvNkVZZGhuSVNuUmg1N2V2dG5mODVRdGsxaEErcFVtaDNGcUxyWFF1MnplWW51UFVGK2JaNHZ3U1NkTGk5VUJ3PT0K",
+                                                  "url":  "https://github.com/Hans199393/parking-os-releases/releases/download/v2026.1.11/Parking.OS_2026.1.11_x64-setup.nsis.zip"
+                                              },
+                      "windows-x86_64":  {
+                                             "signature":  "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTdUtveUZCaTdyQnRGbnZaVEtwN3NJQ3FONUZ6R0dRUjR5UXliaDFQOG9kczN0Nkxtd0hzZVh6MlVnQ3VJN0RDdXlmNnJBS250K0M4T045TnU2emlxMEovc0VXNXRZUkFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc5OTg5NDMxCWZpbGU6UGFya2luZy5PU18yMDI2LjEuMTFfeDY0LXNldHVwLmV4ZQpHS2EyejdLQjN4Qzd2WUpOVHdQSDY2ZXY3R2VNOHpYeUxVL3c5M3RJME5Hd3NxeXdNRGhwTzZDb3N3ZnRZY3lITDg1SWVRdG1tY0FCZUxuNFhlWEdBUT09Cg==",
+                                             "url":  "https://github.com/Hans199393/parking-os-releases/releases/download/v2026.1.11/Parking.OS_2026.1.11_x64-setup.exe"
+                                         }
+                  }
+}

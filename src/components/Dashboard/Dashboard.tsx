@@ -1,14 +1,13 @@
 import { useEffect, useState, useRef, useMemo } from 'react';
 import {
   Camera, CalendarDays, Bell, Car, AlertTriangle, X,
-  Plus, Wallet, ScrollText, TrendingUp, Sparkles, Activity, CloudSun,
+  Plus, Wallet, ScrollText, Sparkles, ToggleRight,
 } from 'lucide-react';
 import {
   getReservationsForDate, getExtraOpenDays, getBotAlerts, resolveBotAlert,
-  getReservationCountByMonth, getBannedVehicles, getAdminLogs,
-  type BotAlert, type AdminLog,
+  getReservationCountByMonth, getBannedVehicles, getConfig, setConfig,
+  type BotAlert, type Reservation,
 } from '../../lib/supabase';
-import { getMonthlyRevenue } from '../../lib/database';
 import { usePerm } from '../../lib/usePerm';
 import { Spinner } from '../shared/UI';
 import { Page } from '../Sidebar/Sidebar';
@@ -117,18 +116,19 @@ interface DashboardProps {
 export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam2HlsUrl, cam3HlsUrl, cam4HlsUrl }: DashboardProps) {
   const perm = usePerm();
   const today = new Date().toISOString().split('T')[0];
-  const [todayRes, setTodayRes] = useState<{ registration: string }[]>([]);
+  const [todayRes, setTodayRes] = useState<Reservation[]>([]);
   const [loading, setLoading] = useState(true);
   const [weatherWidgets, setWeatherWidgets] = useState<WeatherInfo[]>([]);
   const [weatherLoading, setWeatherLoading] = useState(true);
   const [onParking, setOnParking] = useState<number | null>(null);
   const [todayIn, setTodayIn]   = useState<number | null>(null);
   const [botAlerts, setBotAlerts] = useState<BotAlert[]>([]);
-  // Iter 7: KPI / sparkline / orzeł historia
-  const [monthRevenue, setMonthRevenue] = useState<number | null>(null);
+  // Iter 7: KPI / sparkline
   const [weekCounts, setWeekCounts] = useState<number[]>([]); // ostatnie 7 dni (od najstarszego)
   const [bansActive, setBansActive] = useState<number | null>(null);
-  const [orzelLogs, setOrzelLogs] = useState<AdminLog[]>([]);
+  const [parkingFull, setParkingFull] = useState<boolean | null>(null);
+  const [spotsSaving, setSpotsSaving] = useState(false);
+  const [upcomingCounts, setUpcomingCounts] = useState<{ date: string; count: number }[]>([]);
   const detectorOk = onParking !== null;
   const detectorPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const alertPollRef    = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -177,24 +177,30 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
       .finally(() => setLoading(false));
   }, [today, newReservations]);
 
-  // Iter 7: KPI snapshot — przychód miesiąca, 7 dni rezerwacji, bany, ostatnie logi
+  // Wolne/Zajęte — załaduj przy starcie
+  useEffect(() => {
+    getConfig('spots_available').then(val => {
+      setParkingFull(val === 'false');
+    }).catch(() => setParkingFull(false));
+  }, []);
+
+  // Iter 7: KPI snapshot — 7 dni rezerwacji, bany
   useEffect(() => {
     let cancelled = false;
     async function loadKpi() {
       const now = new Date();
       const year = now.getFullYear();
       const month = now.getMonth() + 1;
+      const nextMonthDate = new Date(year, month, 1);
+      const nextYear = nextMonthDate.getFullYear();
+      const nextMonth = nextMonthDate.getMonth() + 1;
       try {
-        const [revs, monthCounts, bans, logs] = await Promise.all([
-          getMonthlyRevenue(year, month).catch(() => []),
+        const [monthCounts, nextMonthCounts, bans] = await Promise.all([
           getReservationCountByMonth(year, month).catch(() => ({} as Record<string, number>)),
+          getReservationCountByMonth(nextYear, nextMonth).catch(() => ({} as Record<string, number>)),
           getBannedVehicles().catch(() => []),
-          // Pobieramy 30 ostatnich logów kategorii 'chat' i filtrujemy po stronie klienta
-          getAdminLogs('chat', 30).catch(() => []),
         ]);
         if (cancelled) return;
-        const total = revs.reduce((s, r) => s + (r.total ?? 0), 0);
-        setMonthRevenue(total);
         const counts: number[] = [];
         for (let i = 6; i >= 0; i--) {
           const d = new Date();
@@ -204,7 +210,16 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
         }
         setWeekCounts(counts);
         setBansActive(bans.filter(b => b.is_banned).length);
-        setOrzelLogs(logs.filter(l => l.action === 'orzel_turn').slice(0, 5));
+        const combined = { ...monthCounts, ...nextMonthCounts };
+        const upcoming: { date: string; count: number }[] = [];
+        for (let i = 1; i <= 14; i++) {
+          const d = new Date();
+          d.setDate(d.getDate() + i);
+          const iso = d.toISOString().split('T')[0];
+          const count = combined[iso] ?? 0;
+          if (count > 0) upcoming.push({ date: iso, count });
+        }
+        setUpcomingCounts(upcoming);
       } catch { /* noop */ }
     }
     void loadKpi();
@@ -269,8 +284,18 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
   // Iter 7: agregaty + sparkline
   const week7Total = useMemo(() => weekCounts.reduce((a, b) => a + b, 0), [weekCounts]);
   const week7Max   = useMemo(() => Math.max(1, ...weekCounts), [weekCounts]);
-  const fmtPLN = (v: number) => v.toLocaleString('pl-PL', { style: 'currency', currency: 'PLN', maximumFractionDigits: 0 });
-  const monthLabel = new Date().toLocaleDateString('pl-PL', { month: 'long' });
+
+  const handleToggleSpots = async () => {
+    if (!perm.has('settings.edit_parking') || spotsSaving || parkingFull === null) return;
+    setSpotsSaving(true);
+    try {
+      const newFull = !parkingFull;
+      await setConfig('spots_available', newFull ? 'false' : 'true');
+      setParkingFull(newFull);
+    } catch { /* ignore */ } finally {
+      setSpotsSaving(false);
+    }
+  };
 
   const QUICK_ACTIONS: { perm: string; label: string; icon: React.ReactNode; page: Page; accent: string; onBefore?: () => void }[] = [
     { perm: 'reservations.create', label: 'Nowa rezerwacja', icon: <Plus size={14} />,           page: 'reservations', accent: 'from-emerald-500/20 to-emerald-500/5 border-emerald-500/30 text-emerald-300' },
@@ -288,174 +313,136 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
           <h1 className="text-xl font-bold text-[var(--color-text)]">Dashboard</h1>
           <p className="text-[var(--color-text-muted)] text-xs capitalize">{dateLabel}</p>
         </div>
-        {newReservations > 0 && (
-          <div
-            className="flex items-center gap-2 bg-teal-500/10 border border-teal-500/40 rounded-lg px-3 py-1.5 cursor-pointer hover:bg-teal-500/20 transition-colors"
-            onClick={() => onNavigate('reservations')}
-          >
-            <Bell size={14} className="text-teal-400" />
-            <span className="text-teal-300 font-semibold text-xs">
-              {newReservations} nowa rezerwacja{newReservations > 1 ? (newReservations < 5 ? 'e' : '') : ''}!
-            </span>
-          </div>
-        )}
-      </div>
-
-      {/* Iter 7: KPI Strip */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3 flex-shrink-0">
-        {/* KPI 1: Wjazdy dziś (z detektora) */}
-        <button
-          onClick={() => onNavigate('cameras')}
-          className="glass-strong rounded-[var(--radius-lg)] p-3 text-left animate-slideUp hover:scale-[1.02] transition-transform"
-          title="Liczba pojazdów wykrytych przez detektor dzisiaj"
-        >
-          <div className="flex items-center justify-between mb-0.5">
-            <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold">Wjazdy dziś</span>
-            <Car size={14} className="text-teal-400 opacity-70" />
-          </div>
-          <div className="flex items-end justify-between gap-2">
-            <div className="hero-number text-2xl font-bold leading-none">{todayIn ?? '…'}</div>
-            <div className="text-[10px] text-[var(--color-text-muted)] pb-0.5">na parkingu: <span className="text-teal-300 font-bold">{onParking ?? '—'}</span></div>
-          </div>
-        </button>
-
-        <button
-          onClick={() => perm.has('finances.view') && onNavigate('finances')}
-          disabled={!perm.has('finances.view')}
-          className="glass-strong rounded-[var(--radius-lg)] p-3 text-left animate-slideUp hover:scale-[1.02] transition-transform disabled:opacity-60 disabled:hover:scale-100"
-        >
-          <div className="flex items-center justify-between mb-0.5">
-            <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold capitalize">Przychód · {monthLabel}</span>
-            <Wallet size={14} className="text-amber-400 opacity-70" />
-          </div>
-          <div className="hero-number text-2xl font-bold leading-none">{monthRevenue == null ? '…' : fmtPLN(monthRevenue)}</div>
-        </button>
-
-        <button
-          onClick={() => onNavigate('reservations')}
-          className="glass-strong rounded-[var(--radius-lg)] p-3 text-left animate-slideUp hover:scale-[1.02] transition-transform"
-        >
-          <div className="flex items-center justify-between mb-0.5">
-            <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold">Ostatnie 7 dni · rezerwacje</span>
-            <TrendingUp size={14} className="text-blue-400 opacity-70" />
-          </div>
-          <div className="flex items-end justify-between gap-2">
-            <div className="hero-number text-2xl font-bold leading-none">{week7Total}</div>
-            {weekCounts.length === 7 && (
-              <div className="flex items-end gap-[2px] h-7 flex-shrink-0" title={weekCounts.map((c, i) => {
-                const d = new Date(); d.setDate(d.getDate() - (6 - i));
-                return `${d.toLocaleDateString('pl-PL', { weekday: 'short', day: 'numeric' })}: ${c}`;
-              }).join(' • ')}>
-                {weekCounts.map((c, i) => (
-                  <div
-                    key={i}
-                    className={`w-2 rounded-sm ${i === 6 ? 'bg-[var(--color-accent)]' : 'bg-blue-500/60'}`}
-                    style={{ height: `${Math.max(8, (c / week7Max) * 28)}px` }}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-        </button>
-
-        {/* KPI 4: Pogoda jutro / najbliższy dzień otwarty (info na nadchodzący dzień) */}
-        <div
-          className="glass-strong rounded-[var(--radius-lg)] p-3 animate-slideUp"
-          title="Prognoza dla najbliższego dnia otwarcia parkingu"
-        >
-          <div className="flex items-center justify-between mb-0.5">
-            <span className="text-[10px] uppercase tracking-wider text-[var(--color-text-muted)] font-semibold">
-              {weatherWidgets[1] ? `Prognoza · ${weatherWidgets[1].label}` : 'Pogoda — następny otwarty'}
-            </span>
-            <CloudSun size={14} className="text-sky-400 opacity-70" />
-          </div>
-          {weatherWidgets[1] ? (
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="text-3xl leading-none">{weatherWidgets[1].emoji}</span>
-                <div className="hero-number text-2xl font-bold leading-none">{weatherWidgets[1].maxTemp}°C</div>
-              </div>
-              <div className="text-[10px] text-[var(--color-text-muted)] text-right max-w-[100px] truncate">{weatherWidgets[1].description}</div>
-            </div>
-          ) : (
-            <div className="text-xs text-[var(--color-text-muted)] mt-1">Brak prognozy</div>
-          )}
-        </div>
-      </div>
-
-      {/* Iter 7: Quick Actions */}
-      {visibleActions.length > 0 && (
-        <div className="flex flex-wrap gap-2 mb-3 flex-shrink-0">
+        <div className="flex items-center gap-1.5">
           {visibleActions.map(a => (
             <button
               key={a.label}
               onClick={() => { a.onBefore?.(); onNavigate(a.page); }}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-[var(--radius-md)] border bg-gradient-to-br ${a.accent} text-xs font-semibold hover:scale-[1.04] transition-transform`}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-[var(--radius-md)] border bg-gradient-to-br ${a.accent} text-xs font-semibold hover:scale-105 transition-transform`}
+              title={a.label}
             >
-              {a.icon} {a.label}
+              {a.icon}
+              <span className="hidden lg:inline">{a.label}</span>
             </button>
           ))}
-        </div>
-      )}
-
-      {/* Weather widgets + detektor */}
-      {(weatherLoading || weatherWidgets.length > 0 || onParking !== null || botAlerts.length > 0) && (
-        <div className="flex gap-3 mb-3 flex-shrink-0 flex-wrap">
-          {weatherLoading ? (
-            <div className="flex items-center gap-2 text-slate-500 text-xs"><Spinner size="sm" /> Ładowanie pogody…</div>
-          ) : (
-            weatherWidgets.map(w => (
-              <div key={w.date} className="flex items-center gap-3 bg-slate-800/60 border border-slate-700 rounded-xl px-4 py-2.5 min-w-[160px]">
-                <span className="text-3xl leading-none">{w.emoji}</span>
-                <div>
-                  <p className="text-xs text-slate-400 font-medium">{w.label}</p>
-                  <p className="text-xl font-bold text-white leading-tight">{w.maxTemp}°C</p>
-                  <p className="text-[11px] text-slate-500">{w.description}</p>
-                </div>
-              </div>
-            ))
-          )}
-          {onParking !== null && (
-            <div
-              className="flex items-center gap-3 bg-teal-900/30 border border-teal-600/40 rounded-xl px-4 py-2.5 min-w-[160px] cursor-pointer hover:bg-teal-900/50 transition-colors"
-              onClick={() => onNavigate('cameras')}
-              title="Przejdź do kamer / detektora"
+          {newReservations > 0 && (
+            <button
+              className="flex items-center gap-2 bg-teal-500/10 border border-teal-500/40 rounded-lg px-3 py-1.5 hover:bg-teal-500/20 transition-colors ml-1"
+              onClick={() => onNavigate('reservations')}
             >
-              <Car size={28} className="text-teal-400 flex-shrink-0" />
-              <div>
-                <p className="text-xs text-teal-400 font-medium">Na parkingu</p>
-                <p className="text-xl font-bold text-white leading-tight">{onParking}</p>
-                <p className="text-[11px] text-slate-400">Wjazdy dziś: {todayIn ?? 0}</p>
-              </div>
-            </div>
+              <Bell size={14} className="text-teal-400" />
+              <span className="text-teal-300 font-semibold text-xs">
+                {newReservations} nowa rezerwacja{newReservations > 1 ? (newReservations < 5 ? 'e' : '') : ''}!
+              </span>
+            </button>
           )}
+        </div>
+      </div>
 
-          {/* Iter 7 fix: Status systemu — wypełnia pas po prawej */}
-          <div className="flex items-center gap-4 bg-slate-800/50 border border-slate-700 rounded-xl px-4 py-2.5 min-w-[260px] flex-1">
-            <Activity size={22} className="text-[var(--color-accent)] flex-shrink-0" />
-            <div className="flex-1 grid grid-cols-2 gap-x-4 gap-y-0.5 text-[11px]">
-              <div className="flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${cameras.filter(c => c.url).length === 4 ? 'bg-emerald-400' : cameras.filter(c => c.url).length > 0 ? 'bg-amber-400' : 'bg-red-400'}`} />
-                <span className="text-slate-400">Kamery:</span>
-                <span className="font-bold text-white">{cameras.filter(c => c.url).length}/4</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${detectorOk ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-                <span className="text-slate-400">Detektor:</span>
-                <span className="font-bold text-white">{detectorOk ? 'online' : 'offline'}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${botAlerts.length === 0 ? 'bg-emerald-400' : 'bg-red-400'}`} />
-                <span className="text-slate-400">Bot:</span>
-                <span className="font-bold text-white">{botAlerts.length === 0 ? 'OK' : `${botAlerts.length} ⚠`}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <span className={`w-1.5 h-1.5 rounded-full ${(bansActive ?? 0) === 0 ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                <span className="text-slate-400">Bany:</span>
-                <span className="font-bold text-white">{bansActive ?? '…'}</span>
-              </div>
+      {/* Info strip — wszystko w jednym pasku */}
+      <div className="glass-strong rounded-[var(--radius-lg)] px-4 py-2.5 mb-3 flex items-center gap-0 flex-shrink-0 overflow-hidden">
+
+        {/* WOLNE / ZAJĘTE toggle */}
+        <button
+          onClick={handleToggleSpots}
+          disabled={!perm.has('settings.edit_parking') || spotsSaving || parkingFull === null}
+          className="flex items-center gap-2.5 pr-4 mr-4 border-r border-slate-700/60 disabled:cursor-default hover:opacity-75 transition-opacity"
+          title={perm.has('settings.edit_parking') ? 'Kliknij aby zmienić dostępność' : ''}
+        >
+          <ToggleRight size={16} className={`flex-shrink-0 ${parkingFull === null ? 'text-slate-500' : parkingFull ? 'text-red-400' : 'text-emerald-400'}`} />
+          <div className="text-left">
+            <div className="text-[9px] uppercase tracking-widest text-slate-500 leading-none mb-0.5">Miejsca</div>
+            <div className={`text-sm font-bold leading-none ${parkingFull === null ? 'text-slate-400' : parkingFull ? 'text-red-400' : 'text-emerald-400'}`}>
+              {parkingFull === null ? '…' : parkingFull ? 'ZAJĘTE' : 'WOLNE'}
+            </div>
+            {perm.has('settings.edit_parking') && (
+              <div className="text-[9px] text-slate-600 leading-none mt-0.5">{spotsSaving ? 'zapis…' : 'kliknij'}</div>
+            )}
+          </div>
+        </button>
+
+        {/* 7 dni sparkline */}
+        <div className="flex items-center gap-2.5 pr-4 mr-4 border-r border-slate-700/60">
+          <div>
+            <div className="text-[9px] uppercase tracking-widest text-slate-500 leading-none mb-0.5">7 dni</div>
+            <div className="flex items-end gap-1">
+              <span className="text-sm font-bold text-white leading-none">{week7Total}</span>
+              <span className="text-[10px] text-slate-500 pb-px">rez.</span>
             </div>
           </div>
+          {weekCounts.length === 7 && (
+            <div className="flex items-end gap-[2px] h-5 self-end mb-0.5" title={weekCounts.map((c, i) => {
+              const d = new Date(); d.setDate(d.getDate() - (6 - i));
+              return `${d.toLocaleDateString('pl-PL', { weekday: 'short', day: 'numeric' })}: ${c}`;
+            }).join(' • ')}>
+              {weekCounts.map((c, i) => (
+                <div key={i} className={`w-1.5 rounded-sm ${i === 6 ? 'bg-[var(--color-accent)]' : 'bg-blue-500/50'}`}
+                  style={{ height: `${Math.max(3, (c / week7Max) * 18)}px` }} />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Pogoda: dziś + następny otwarty */}
+        {(weatherLoading || weatherWidgets.length > 0) && (
+          <div className="flex items-center gap-3 pr-4 mr-4 border-r border-slate-700/60">
+            {weatherLoading ? (
+              <span className="text-xs text-slate-500">Pogoda…</span>
+            ) : (
+              weatherWidgets.map((w, i) => (
+                <div key={w.date} className={`flex items-center gap-1.5 ${i > 0 ? 'pl-3 border-l border-slate-700/40' : ''}`}>
+                  <span className="text-lg leading-none">{w.emoji}</span>
+                  <div>
+                    <div className="text-[9px] uppercase tracking-widest text-slate-500 leading-none mb-0.5">{w.label}</div>
+                    <div className="text-sm font-bold text-white leading-none">{w.maxTemp}°C</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Detektor */}
+        {onParking !== null && (
+          <button
+            onClick={() => onNavigate('cameras')}
+            className="flex items-center gap-2.5 pr-4 mr-4 border-r border-slate-700/60 hover:opacity-75 transition-opacity"
+          >
+            <Car size={15} className="text-teal-400 flex-shrink-0" />
+            <div className="text-left">
+              <div className="text-[9px] uppercase tracking-widest text-slate-500 leading-none mb-0.5">Na parkingu</div>
+              <div className="flex items-end gap-1">
+                <span className="text-sm font-bold text-teal-300 leading-none">{onParking}</span>
+                <span className="text-[10px] text-slate-500 pb-px">/ {todayIn ?? 0} dziś</span>
+              </div>
+            </div>
+          </button>
+        )}
+
+        {/* Status dots — prawa strona */}
+        <div className="ml-auto flex items-center gap-4 text-[11px] flex-shrink-0">
+          <div className="flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${cameras.filter(c => c.url).length === 4 ? 'bg-emerald-400' : cameras.filter(c => c.url).length > 0 ? 'bg-amber-400' : 'bg-red-400'}`} />
+            <span className="text-slate-400">Kam <span className="font-semibold text-white">{cameras.filter(c => c.url).length}/4</span></span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${detectorOk ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+            <span className="text-slate-400">Det <span className="font-semibold text-white">{detectorOk ? 'on' : 'off'}</span></span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${botAlerts.length === 0 ? 'bg-emerald-400' : 'bg-red-400'}`} />
+            <span className="text-slate-400">Bot <span className="font-semibold text-white">{botAlerts.length === 0 ? 'OK' : `${botAlerts.length} ⚠`}</span></span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${(bansActive ?? 0) === 0 ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+            <span className="text-slate-400">Bany <span className="font-semibold text-white">{bansActive ?? '…'}</span></span>
+          </div>
+        </div>
+      </div>
+
+      {/* Bot alerts — tylko gdy są */}
+      {botAlerts.length > 0 && (
+        <div className="flex gap-2 mb-3 flex-shrink-0 flex-wrap">
           {botAlerts.map(alert => {
             const labelMap: Record<string, string> = {
               groq_tpd_limit: 'TPD — dzienny limit tokenów',
@@ -466,11 +453,7 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
             };
             const label = labelMap[alert.type] ?? alert.type;
             return (
-              <div
-                key={alert.id}
-                className="flex items-center gap-3 bg-red-900/30 border border-red-600/40 rounded-xl px-4 py-2.5 min-w-[200px] max-w-[340px]"
-                title={alert.message ?? alert.type}
-              >
+              <div key={alert.id} className="flex items-center gap-3 bg-red-900/30 border border-red-600/40 rounded-xl px-4 py-2.5 min-w-[200px] max-w-[340px]" title={alert.message ?? alert.type}>
                 <AlertTriangle size={24} className="text-red-400 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-red-400 font-semibold">⚠️ Bot — usterka</p>
@@ -479,14 +462,8 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
                     {new Date(alert.created_at).toLocaleString('pl-PL', { timeZone: 'Europe/Warsaw', hour: '2-digit', minute: '2-digit', day: 'numeric', month: 'numeric' })}
                   </p>
                 </div>
-                <button
-                  className="text-slate-500 hover:text-red-300 transition-colors flex-shrink-0 ml-1"
-                  title="Oznacz jako rozwiązane"
-                  onClick={async () => {
-                    await resolveBotAlert(alert.id);
-                    setBotAlerts(prev => prev.filter(a => a.id !== alert.id));
-                  }}
-                >
+                <button className="text-slate-500 hover:text-red-300 transition-colors flex-shrink-0 ml-1" title="Oznacz jako rozwiązane"
+                  onClick={async () => { await resolveBotAlert(alert.id); setBotAlerts(prev => prev.filter(a => a.id !== alert.id)); }}>
                   <X size={14} />
                 </button>
               </div>
@@ -549,48 +526,49 @@ export default function Dashboard({ onNavigate, newReservations, cam1HlsUrl, cam
               </div>
             ) : (
               <div className="space-y-1.5">
-                <div className="text-2xl font-bold text-teal-400 mb-2">{todayRes.length}</div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-2xl font-bold text-teal-400">{todayRes.filter(r => r.status === 'confirmed').length}</span>
+                  <span className="text-xs text-slate-400">potwierdzonych</span>
+                  {todayRes.length > todayRes.filter(r => r.status === 'confirmed').length && (
+                    <span className="text-xs text-slate-500">/ {todayRes.length} łącznie</span>
+                  )}
+                </div>
                 {todayRes.map((r, i) => (
-                  <div key={i} className="flex items-center gap-2 bg-slate-900 rounded-lg px-2.5 py-1.5 border border-slate-700">
-                    <span className="text-xs text-slate-500 w-4">{i + 1}.</span>
-                    <span className="text-sm font-mono font-semibold text-white tracking-wider">{r.registration}</span>
+                  <div key={i} className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 border ${
+                    r.status === 'confirmed' ? 'bg-slate-900 border-slate-700' : 'bg-slate-900/50 border-slate-800 opacity-60'
+                  }`}>
+                    <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                      r.status === 'confirmed' ? 'bg-teal-400' : 'bg-slate-500'
+                    }`} />
+                    <span className={`text-sm font-mono font-semibold tracking-wider flex-1 ${
+                      r.status === 'confirmed' ? 'text-white' : 'text-slate-400'
+                    }`}>{r.registration}</span>
+                    {r.status !== 'confirmed' && (
+                      <span className="text-[9px] text-slate-500 uppercase">{r.status}</span>
+                    )}
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          {/* Iter 7 fix: Ostatnie pytania do Orła (zamiast ogólnych zdarzeń) */}
-          {perm.has('chat.use') && orzelLogs.length > 0 && (
+          {/* Nadchodzące rezerwacje */}
+          {upcomingCounts.length > 0 && (
             <div className="mt-3 pt-3 border-t border-[var(--color-border)] flex-shrink-0">
-              <div className="flex items-center justify-between mb-1.5">
-                <div className="flex items-center gap-1.5">
-                  <Sparkles size={12} className="text-violet-400" />
-                  <span className="text-[10px] uppercase tracking-wider font-semibold text-[var(--color-text-muted)]">Ostatnie pytania do Orła</span>
-                </div>
-                <button
-                  onClick={() => { sessionStorage.setItem('chat_initial_tab', 'asystent'); onNavigate('chat'); }}
-                  className="text-[10px] text-violet-400 hover:underline"
-                >Otwórz →</button>
-              </div>
-              <div className="space-y-1">
-                {orzelLogs.slice(0, 5).map(l => {
-                  const meta = l.metadata as Record<string, unknown> | null;
-                  const q = (meta?.question as string) ?? l.description?.replace(/^Q:\s*/, '') ?? l.action;
+              <p className="text-[10px] uppercase tracking-widest text-slate-500 mb-2">Nadchodzące</p>
+              <div className="space-y-0.5">
+                {upcomingCounts.slice(0, 5).map(({ date, count }) => {
+                  const d = new Date(date + 'T12:00:00');
                   return (
                     <button
-                      key={l.id}
-                      onClick={() => { sessionStorage.setItem('chat_initial_tab', 'asystent'); onNavigate('chat'); }}
-                      className="w-full text-left px-2 py-1 rounded hover:bg-[var(--color-surface-2)] transition-colors"
-                      title={q}
+                      key={date}
+                      onClick={() => onNavigate('reservations')}
+                      className="w-full flex items-center justify-between text-xs hover:bg-slate-800/60 rounded px-1.5 py-1 transition-colors"
                     >
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-violet-400" />
-                        <span className="text-[10px] text-[var(--color-text-muted)] flex-shrink-0">
-                          {new Date(l.created_at).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                        <span className="text-[11px] truncate text-[var(--color-text)]">{q}</span>
-                      </div>
+                      <span className="text-slate-300 capitalize">
+                        {d.toLocaleDateString('pl-PL', { weekday: 'short', day: 'numeric', month: 'short' })}
+                      </span>
+                      <span className="text-teal-400 font-semibold">{count}</span>
                     </button>
                   );
                 })}
