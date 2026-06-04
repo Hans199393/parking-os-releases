@@ -121,7 +121,7 @@ export default function Settings({ onThemeChange, theme, onSettingsSaved: _onSet
           {tab === 'integrations' && <IntegrationsTab values={values} set={set} />}
           {tab === 'assistants'   && <AssistantsTab user={user} />}
           {tab === 'appearance'   && <AppearanceTab values={values} set={set} theme={theme} onThemeChange={onThemeChange} />}
-          {tab === 'system'       && <SystemTab />}
+          {tab === 'system'       && <SystemTab values={values} set={set} />}
           {tab === 'accounts'     && <AccountsTab user={user} />}
         </main>
       </div>

@@ -4,13 +4,18 @@
 import { useState, useEffect } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
-import { Power, RefreshCw, Download, CheckCircle2, AlertTriangle, Info } from 'lucide-react';
+import { Power, RefreshCw, Download, CheckCircle2, AlertTriangle, Info, Timer } from 'lucide-react';
 
 import { updateClient } from '../../lib/update-client';
 import type { AppUpdateInfo } from '../../lib/update-types';
 
 interface AutostartStatus {
   enabled: boolean;
+}
+
+interface SystemTabProps {
+  values: Record<string, string>;
+  set: (key: string, val: string) => void;
 }
 
 type UpdateState = 'idle' | 'checking' | 'available' | 'none' | 'downloading' | 'done' | 'error';
@@ -21,7 +26,7 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-export default function SystemTab() {
+export default function SystemTab({ values, set }: SystemTabProps) {
   const [autostartEnabled, setAutostartEnabled] = useState<boolean | null>(null);
   const [autostartBusy, setAutostartBusy] = useState(false);
   const [currentVersion, setCurrentVersion] = useState('—');
@@ -160,6 +165,48 @@ export default function SystemTab() {
             Status: {autostartEnabled ? 'włączony — aplikacja uruchomi się automatycznie' : 'wyłączony'}
           </p>
         )}
+      </div>
+
+      {/* Blokada ekranu po bezczynności */}
+      <div className="glass-strong rounded-[var(--radius-lg)] p-5 border border-[var(--color-border)]">
+        <div className="flex items-start gap-3 mb-4">
+          <div className="w-10 h-10 rounded-[var(--radius-md)] bg-[var(--color-surface-2)] flex items-center justify-center flex-shrink-0">
+            <Timer size={18} className="text-[var(--color-accent)]" />
+          </div>
+          <div>
+            <p className="font-semibold text-sm text-[var(--color-text)]">Blokada ekranu po bezczynności</p>
+            <p className="text-xs text-[var(--color-text-muted)] mt-0.5">
+              Po podanym czasie nieaktywności aplikacja automatycznie zablokuje ekran i zarząda PIN-u / hasła.
+              Wartość <span className="font-mono">0</span> = wyłączone.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <input
+            type="number"
+            min={0}
+            max={120}
+            step={1}
+            value={values['session_idle_timeout_min'] ?? '0'}
+            onChange={e => {
+              const raw = e.target.value.replace(/[^0-9]/g, '');
+              const n = Math.min(120, Math.max(0, parseInt(raw || '0', 10)));
+              set('session_idle_timeout_min', String(n));
+            }}
+            className="w-24 px-3 py-1.5 rounded-[var(--radius-md)] bg-[var(--color-surface-3)]
+              border border-[var(--color-border)] text-[var(--color-text)] text-sm
+              focus:outline-none focus:ring-1 focus:ring-[var(--color-accent)]"
+          />
+          <span className="text-sm text-[var(--color-text-muted)]">
+            {parseInt(values['session_idle_timeout_min'] || '0', 10) === 0
+              ? 'minut (wyłączone)'
+              : `minut${parseInt(values['session_idle_timeout_min'] || '0', 10) === 1 ? 'a' : 'y'} bezczynności`}
+          </span>
+        </div>
+        <p className="mt-2 text-xs text-[var(--color-text-muted)] flex items-center gap-1.5">
+          <Info size={11} />
+          Zakres: 0–120 minut. Zmiana obowiązuje natychmiast.
+        </p>
       </div>
 
       {/* Aktualizacje */}

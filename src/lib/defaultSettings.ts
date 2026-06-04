@@ -64,6 +64,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   orzel_temperature: '0.3',
   orzel_expanded_mode: 'false',
   orzel_quick_actions: '[{"label":"Znajdź tablicę","tool":"find_reservation"},{"label":"Sprawdź obłożenie","tool":"check_capacity"},{"label":"Lista rezerwacji","tool":"list_reservations"}]',
+  session_idle_timeout_min: '0',
 };
 
 export function getDefaultSetting(key: string): string | undefined {

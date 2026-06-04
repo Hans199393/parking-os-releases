@@ -288,6 +288,22 @@ export default function App() {
     });
   }, []);
 
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const keys: string[] = (e as CustomEvent).detail?.keys ?? [];
+      if (!keys.includes('session_idle_timeout_min')) return;
+      void getStore().then(async store => {
+        const v = await store.get<string | number>('session_idle_timeout_min');
+        if (v != null) {
+          const n = typeof v === 'number' ? v : parseInt(String(v), 10);
+          if (!isNaN(n) && n >= 0 && n <= 120) setIdleTimeoutMin(n);
+        }
+      });
+    };
+    window.addEventListener('app:settings-saved', handler);
+    return () => window.removeEventListener('app:settings-saved', handler);
+  }, []);
+
   useIdleLock({
     enabled: authenticated && !locked && idleTimeoutMin > 0,
     timeoutMs: idleTimeoutMin * 60_000,

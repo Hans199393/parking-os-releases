@@ -39,6 +39,8 @@ export const ALL_SETTINGS_KEYS = [
   'orzel_expanded_mode',
   // Konfigurowalne przyciski quick-action w panelu Orła (CSV nazw narzędzi)
   'orzel_quick_actions',
+  // Sesja — blokada ekranu po bezczynności
+  'session_idle_timeout_min',
 ] as const;
 
 export type SettingKey = typeof ALL_SETTINGS_KEYS[number] | (string & {});
