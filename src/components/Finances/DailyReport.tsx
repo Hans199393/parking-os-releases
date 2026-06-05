@@ -34,7 +34,8 @@ export default function DailyReport({ revenues, invoices, selectedDate, commissi
   const dayOperCosts = dayInvoices.filter(i => i.category !== 'Inwestycja').reduce((s, i) => s + i.amount, 0);
   const dayInvestCosts = dayInvoices.filter(i => i.category === 'Inwestycja').reduce((s, i) => s + i.amount, 0);
   const dayTotalCosts = dayOperCosts + dayInvestCosts;
-  const dayProfit = r ? (r.total ?? 0) - dayTotalCosts : 0;
+  const dayNetRevenue = r ? (r.do_sejfu ?? 0) + (r.card ?? 0) + (r.blik ?? 0) : 0;
+  const dayProfit = dayNetRevenue - dayTotalCosts;
   const card_net = r ? r.card * (1 - commissionRate / 100) : 0;
   const blik_net = r ? r.blik * (1 - commissionRate / 100) : 0;
 
@@ -82,7 +83,7 @@ export default function DailyReport({ revenues, invoices, selectedDate, commissi
               </Card>
               <Card className="text-center py-3">
                 <p className="text-xs text-slate-500 mb-1">Razem przychód</p>
-                <p className="text-xl font-bold text-teal-400">{formatPLN(r.total ?? 0)}</p>
+                <p className="text-xl font-bold text-teal-400">{formatPLN(dayNetRevenue)}</p>
               </Card>
               <Card className="text-center py-3">
                 <p className="text-xs text-slate-500 mb-1">Karta + BLIK</p>
@@ -227,7 +228,7 @@ export default function DailyReport({ revenues, invoices, selectedDate, commissi
             <div className="bg-slate-900 rounded-xl border border-teal-700/40 px-4 py-3 space-y-1.5 text-sm">
               <div className="flex justify-between">
                 <span className="text-slate-400">Przychód dnia:</span>
-                <span className="text-teal-300 font-semibold">{formatPLN(r.total ?? 0)}</span>
+                <span className="text-teal-300 font-semibold">{formatPLN(dayNetRevenue)}</span>
               </div>
               {dayOperCosts > 0 && (
                 <div className="flex justify-between">
