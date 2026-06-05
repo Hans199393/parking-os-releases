@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getYearlyRevenue, getYearlyInvoices, DailyRevenue, Invoice } from '../../lib/database';
+import { getYearlyRevenue, getYearlyInvoices, DailyRevenue, Invoice, netRevenue } from '../../lib/database';
 import { Card, Spinner } from '../shared/UI';
 
 const MONTHS = ['Styczeń','Luty','Marzec','Kwiecień','Maj','Czerwiec','Lipiec','Sierpień','Wrzesień','Październik','Listopad','Grudzień'];
@@ -53,7 +53,7 @@ export default function YearlyReport({ year, totalInvestments, totalRevenueAllTi
   for (const r of revenues) {
     const m = parseInt(r.date.split('-')[1]) - 1;
     monthlyData[m].days++;
-    monthlyData[m].revenue += r.total ?? 0;
+    monthlyData[m].revenue += netRevenue(r);
     monthlyData[m].cars += r.estimated_cars ?? 0;
   }
 

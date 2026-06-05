@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getYearlyRevenue, DailyRevenue } from '../../lib/database';
+import { getYearlyRevenue, DailyRevenue, netRevenue } from '../../lib/database';
 import { Card } from '../shared/UI';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend
@@ -46,7 +46,7 @@ export default function SeasonCompare({ currentYear }: Props) {
     for (const r of data) {
       const m = new Date(r.date).getMonth() + 1;
       if (!SEASON_MONTHS.includes(m)) continue;
-      monthlyByYear[y][m] = (monthlyByYear[y][m] ?? 0) + (r.total ?? 0);
+      monthlyByYear[y][m] = (monthlyByYear[y][m] ?? 0) + netRevenue(r);
     }
   }
 
@@ -71,12 +71,12 @@ export default function SeasonCompare({ currentYear }: Props) {
   for (const [y, data] of allData.entries()) {
     const seasonDays = data.filter(r => {
       const m = new Date(r.date).getMonth() + 1;
-      return SEASON_MONTHS.includes(m) && (r.total ?? 0) > 0;
+      return SEASON_MONTHS.includes(m) && netRevenue(r) > 0;
     });
     dailyByYear[y] = {
       days: seasonDays.length,
       avg: seasonDays.length > 0
-        ? seasonDays.reduce((s, r) => s + (r.total ?? 0), 0) / seasonDays.length
+        ? seasonDays.reduce((s, r) => s + netRevenue(r), 0) / seasonDays.length
         : 0,
     };
   }

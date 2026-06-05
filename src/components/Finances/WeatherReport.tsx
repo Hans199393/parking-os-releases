@@ -1,4 +1,4 @@
-import { DailyRevenue } from '../../lib/database';
+import { DailyRevenue, netRevenue } from '../../lib/database';
 import { Card } from '../shared/UI';
 import {
   ScatterChart, Scatter, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Label
@@ -20,7 +20,7 @@ interface Props {
 }
 
 export default function WeatherReport({ revenues }: Props) {
-  const withWeather = revenues.filter(r => r.weather && (r.total ?? 0) > 0);
+  const withWeather = revenues.filter(r => !!r.weather);
 
   if (withWeather.length === 0) {
     return (
@@ -37,9 +37,9 @@ export default function WeatherReport({ revenues }: Props) {
   // Group by weather type
   const groups = Object.keys(WEATHER_LABELS).map(key => {
     const days = withWeather.filter(r => r.weather === key);
-    const avg = days.length > 0 ? days.reduce((s, r) => s + (r.total ?? 0), 0) / days.length : 0;
-    const max = days.length > 0 ? Math.max(...days.map(r => r.total ?? 0)) : 0;
-    const min = days.length > 0 ? Math.min(...days.map(r => r.total ?? 0)) : 0;
+    const avg = days.length > 0 ? days.reduce((s, r) => s + netRevenue(r), 0) / days.length : 0;
+    const max = days.length > 0 ? Math.max(...days.map(r => netRevenue(r))) : 0;
+    const min = days.length > 0 ? Math.min(...days.map(r => netRevenue(r))) : 0;
     return { key, days: days.length, avg, max, min, ...WEATHER_LABELS[key] };
   }).filter(g => g.days > 0).sort((a, b) => b.avg - a.avg);
 
@@ -48,7 +48,7 @@ export default function WeatherReport({ revenues }: Props) {
     .filter(r => r.temperature != null)
     .map(r => ({
       temp: r.temperature as number,
-      total: r.total ?? 0,
+      total: netRevenue(r),
       weather: r.weather,
       date: r.date,
     }));
@@ -164,7 +164,7 @@ export default function WeatherReport({ revenues }: Props) {
                     {r.temperature != null ? `${r.temperature}°C` : '—'}
                   </td>
                   <td className="py-1.5 pr-2 text-right font-semibold text-teal-400">
-                    {formatPLN(r.total ?? 0)}
+                    {formatPLN(netRevenue(r))}
                   </td>
                 </tr>
               );

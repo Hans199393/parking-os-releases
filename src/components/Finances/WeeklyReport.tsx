@@ -1,4 +1,4 @@
-import { DailyRevenue } from '../../lib/database';
+import { DailyRevenue, netRevenue } from '../../lib/database';
 import { Card } from '../shared/UI';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid
@@ -59,12 +59,12 @@ export default function WeeklyReport({ revenues, weekOffset, onOffsetChange }: P
     return d >= baseMonday && d <= baseSunday;
   });
 
-  const totalRevenue = weekRevenues.reduce((s, r) => s + (r.total ?? 0), 0);
+  const totalRevenue = weekRevenues.reduce((s, r) => s + netRevenue(r), 0);
   const totalCars = weekRevenues.reduce((s, r) => s + (r.estimated_cars ?? 0), 0);
   const workDays = weekRevenues.length;
   const avgRevPerDay = workDays > 0 ? totalRevenue / workDays : 0;
   const bestDay = weekRevenues.length > 0
-    ? weekRevenues.reduce((a, b) => (b.total ?? 0) > (a.total ?? 0) ? b : a)
+    ? weekRevenues.reduce((a, b) => netRevenue(b) > netRevenue(a) ? b : a)
     : null;
 
   // Chart data — one bar per revenue day this week
@@ -73,7 +73,7 @@ export default function WeeklyReport({ revenues, weekOffset, onOffsetChange }: P
       const d = parseRevDate(r.date);
       return {
         label: `${DOW_SHORT[d.getDay()]} ${String(d.getDate()).padStart(2, '0')}`,
-        przychód: r.total ?? 0,
+        przychód: netRevenue(r),
       };
     })
     .sort((a, b) => a.label.localeCompare(b.label));
@@ -188,7 +188,7 @@ export default function WeeklyReport({ revenues, weekOffset, onOffsetChange }: P
                         <td className="py-2 pl-2 text-white">
                           {DOW_SHORT[d.getDay()]} {formatDate(d)}
                         </td>
-                        <td className="py-2 text-right text-teal-400 font-medium">{formatPLN(r.total ?? 0)}</td>
+                        <td className="py-2 text-right text-teal-400 font-medium">{formatPLN(netRevenue(r))}</td>
                         <td className="py-2 text-right text-slate-400">{r.estimated_cars ?? '—'}</td>
                         <td className="py-2 pr-2 text-right">
                           {r.weather === 'sunny' ? '☀️' : r.weather === 'cloudy' ? '🌤️' : r.weather === 'rainy' ? '🌧️' : r.weather === 'stormy' ? '⛈️' : '—'}

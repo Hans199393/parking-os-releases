@@ -305,6 +305,11 @@ export interface DailyRevenue {
   do_sejfu?: number;
 }
 
+/** Przychód netto dnia = do_sejfu (gotówka minus carry-over baza) + karta + blik. Min 0. */
+export function netRevenue(r: DailyRevenue): number {
+  return Math.max(0, r.do_sejfu ?? 0) + (r.card ?? 0) + (r.blik ?? 0);
+}
+
 function computeTotals(r: DailyRevenue): DailyRevenue {
   const coins = r.qty_1 * 1 + r.qty_2 * 2 + r.qty_5 * 5;
   const banknotes = r.qty_10 * 10 + r.qty_20 * 20 + r.qty_50 * 50 + r.qty_100 * 100 + r.qty_200 * 200 + r.qty_500 * 500;

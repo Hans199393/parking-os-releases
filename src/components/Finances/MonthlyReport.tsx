@@ -1,4 +1,4 @@
-import { DailyRevenue, Invoice } from '../../lib/database';
+import { DailyRevenue, Invoice, netRevenue } from '../../lib/database';
 import { Card } from '../shared/UI';
 
 const MONTHS = ['Styczeń','Luty','Marzec','Kwiecień','Maj','Czerwiec','Lipiec','Sierpień','Wrzesień','Październik','Listopad','Grudzień'];
@@ -15,7 +15,7 @@ interface Props {
 }
 
 export default function MonthlyReport({ revenues, invoices, year, month }: Props) {
-  const totalRevenue = revenues.reduce((s, r) => s + (r.total ?? 0), 0);
+  const totalRevenue = revenues.reduce((s, r) => s + netRevenue(r), 0);
   const operCosts = invoices.filter(i => i.category !== 'Inwestycja').reduce((s, i) => s + i.amount, 0);
   const investCosts = invoices.filter(i => i.category === 'Inwestycja').reduce((s, i) => s + i.amount, 0);
   const operProfit = totalRevenue - operCosts;
@@ -23,7 +23,7 @@ export default function MonthlyReport({ revenues, invoices, year, month }: Props
   const totalCars = revenues.reduce((s, r) => s + (r.estimated_cars ?? 0), 0);
   const avgRevenue = revenues.length > 0 ? totalRevenue / revenues.length : 0;
   const bestDay = revenues.length > 0
-    ? revenues.reduce((a, b) => (b.total ?? 0) > (a.total ?? 0) ? b : a)
+    ? revenues.reduce((a, b) => netRevenue(b) > netRevenue(a) ? b : a)
     : null;
 
   // Cost by category
@@ -88,7 +88,7 @@ export default function MonthlyReport({ revenues, invoices, year, month }: Props
           <p className="text-slate-500 text-xs mb-1">Najlepszy dzień</p>
           <p className="text-sm font-bold text-teal-300">
             {bestDay
-              ? `${bestDay.date.split('-')[2]} → ${formatPLN(bestDay.total ?? 0)}`
+              ? `${bestDay.date.split('-')[2]} → ${formatPLN(netRevenue(bestDay))}`
               : '—'}
           </p>
         </Card>
@@ -142,7 +142,7 @@ export default function MonthlyReport({ revenues, invoices, year, month }: Props
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-slate-500 text-xs">{r.estimated_cars ?? 0} aut</span>
-                    <span className="text-teal-300 font-semibold">{formatPLN(r.total ?? 0)}</span>
+                    <span className="text-teal-300 font-semibold">{formatPLN(netRevenue(r))}</span>
                   </div>
                 </div>
               ))}

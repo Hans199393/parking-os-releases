@@ -20,12 +20,10 @@ function formatPLN(amount: number): string {
 }
 
 function totalRevenue(r: DailyRevenue, commissionRate: number): number {
-  const cash = (r.qty_1 ?? 0) + (r.qty_2 ?? 0) * 2 + (r.qty_5 ?? 0) * 5
-    + (r.qty_10 ?? 0) * 10 + (r.qty_20 ?? 0) * 20 + (r.qty_50 ?? 0) * 50
-    + (r.qty_100 ?? 0) * 100 + (r.qty_200 ?? 0) * 200 + (r.qty_500 ?? 0) * 500;
+  const do_sejfu = Math.max(0, r.do_sejfu ?? 0);
   const cardNet = (r.card ?? 0) * (1 - commissionRate / 100);
   const blikNet = (r.blik ?? 0) * (1 - commissionRate / 100);
-  return cash + cardNet + blikNet;
+  return do_sejfu + cardNet + blikNet;
 }
 
 interface KPIProps {

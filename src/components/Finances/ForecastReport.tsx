@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getYearlyRevenue, DailyRevenue } from '../../lib/database';
+import { getYearlyRevenue, DailyRevenue, netRevenue } from '../../lib/database';
 import { Card } from '../shared/UI';
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine
@@ -66,7 +66,7 @@ export default function ForecastReport({ currentYear }: Props) {
     const existing = monthMap.get(key) || { year: y, month: m, total: 0, days: 0 };
     monthMap.set(key, {
       ...existing,
-      total: existing.total + (r.total ?? 0),
+      total: existing.total + netRevenue(r),
       days: existing.days + 1,
     });
   }

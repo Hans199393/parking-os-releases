@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getAllRevenues, getAllInvoices, DailyRevenue, Invoice } from '../../lib/database';
+import { getAllRevenues, getAllInvoices, DailyRevenue, Invoice, netRevenue } from '../../lib/database';
 import { Card, Spinner } from '../shared/UI';
 import { Trophy, TrendingUp, TrendingDown, ArrowLeft, ExternalLink } from 'lucide-react';
 
@@ -81,7 +81,7 @@ export default function AllTimeReport() {
     const y = parseInt(r.date.split('-')[0]);
     if (!yearMap[y]) yearMap[y] = { year: y, days: 0, revenue: 0, cash: 0, card: 0, blik: 0, operCosts: 0, investCosts: 0, cars: 0 };
     yearMap[y].days++;
-    yearMap[y].revenue += r.total ?? 0;
+    yearMap[y].revenue += netRevenue(r);
     yearMap[y].cash += r.cash ?? 0;
     yearMap[y].card += r.card ?? 0;
     yearMap[y].blik += r.blik ?? 0;
@@ -96,7 +96,7 @@ export default function AllTimeReport() {
   const years = Object.values(yearMap).sort((a, b) => a.year - b.year);
 
   // --- totals ---
-  const totalRevenue = revenues.reduce((s, r) => s + (r.total ?? 0), 0);
+  const totalRevenue = revenues.reduce((s, r) => s + netRevenue(r), 0);
   const totalCash = revenues.reduce((s, r) => s + (r.cash ?? 0), 0);
   const totalCard = revenues.reduce((s, r) => s + (r.card ?? 0), 0);
   const totalBlik = revenues.reduce((s, r) => s + (r.blik ?? 0), 0);
@@ -113,7 +113,7 @@ export default function AllTimeReport() {
   for (const r of revenues) {
     const m = parseInt(r.date.split('-')[1]);
     const y = parseInt(r.date.split('-')[0]);
-    monthMap[m].revenue += r.total ?? 0;
+    monthMap[m].revenue += netRevenue(r);
     monthMap[m].cash += r.cash ?? 0;
     monthMap[m].card += r.card ?? 0;
     monthMap[m].blik += r.blik ?? 0;
@@ -130,7 +130,7 @@ export default function AllTimeReport() {
   const dowMap = Array.from({ length: 7 }, (_, i) => ({ dow: i, revenue: 0, cash: 0, card: 0, blik: 0, count: 0, cars: 0 }));
   for (const r of revenues) {
     const dow = new Date(r.date).getDay();
-    dowMap[dow].revenue += r.total ?? 0;
+    dowMap[dow].revenue += netRevenue(r);
     dowMap[dow].cash += r.cash ?? 0;
     dowMap[dow].card += r.card ?? 0;
     dowMap[dow].blik += r.blik ?? 0;
@@ -141,12 +141,12 @@ export default function AllTimeReport() {
   const maxDowAvg = Math.max(...dowWithData.map(d => d.count > 0 ? d.revenue / d.count : 0));
 
   // --- sorted days ---
-  const sortedDesc = [...revenues].sort((a, b) => (b.total ?? 0) - (a.total ?? 0));
-  const sortedAsc = sortedDesc.filter(r => (r.total ?? 0) > 0).reverse();
+  const sortedDesc = [...revenues].sort((a, b) => netRevenue(b) - netRevenue(a));
+  const sortedAsc = [...sortedDesc].reverse();
   const record = sortedDesc[0];
 
   // --- median ---
-  const allTotals = revenues.map(r => r.total ?? 0).sort((a, b) => a - b);
+  const allTotals = revenues.map(r => netRevenue(r)).sort((a, b) => a - b);
   const median = allTotals.length > 0
     ? allTotals.length % 2 === 0
       ? (allTotals[allTotals.length / 2 - 1] + allTotals[allTotals.length / 2]) / 2
@@ -162,7 +162,7 @@ export default function AllTimeReport() {
     { label: '2 000+ zł', min: 2000, max: Infinity, days: [] as DailyRevenue[], color: 'bg-green-500' },
   ];
   for (const r of revenues) {
-    const t = r.total ?? 0;
+    const t = netRevenue(r);
     for (const b of buckets) { if (t >= b.min && t < b.max) { b.days.push(r); break; } }
   }
   const maxBucket = Math.max(...buckets.map(b => b.days.length), 1);
@@ -414,7 +414,7 @@ export default function AllTimeReport() {
                       <td className="py-2 text-right text-teal-300">{formatPLN(r.cash ?? 0)}</td>
                       <td className="py-2 text-right text-blue-300">{formatPLN(r.card ?? 0)}</td>
                       <td className="py-2 text-right text-purple-300">{formatPLN(r.blik ?? 0)}</td>
-                      <td className={`py-2 text-right font-semibold ${isTop ? 'text-teal-400' : 'text-orange-400'}`}>{formatPLN(r.total ?? 0)}</td>
+                      <td className={`py-2 text-right font-semibold ${isTop ? 'text-teal-400' : 'text-orange-400'}`}>{formatPLN(netRevenue(r))}</td>
                       <td className="py-2 text-right text-yellow-400 text-xs">{r.estimated_cars ?? 0}</td>
                       <td className="py-2 px-1"><PaymentBar cash={r.cash ?? 0} card={r.card ?? 0} blik={r.blik ?? 0} /></td>
                     </tr>
@@ -469,13 +469,13 @@ export default function AllTimeReport() {
                     </tr>
                   </thead>
                   <tbody>
-                    {[...b.days].sort((a, bb) => (bb.total ?? 0) - (a.total ?? 0)).map(r => (
+                    {[...b.days].sort((a, bb) => netRevenue(bb) - netRevenue(a)).map(r => (
                       <tr key={r.date} className="border-b border-slate-800/50">
                         <td className="py-1 text-slate-400">{r.date}</td>
                         <td className="py-1 text-right text-teal-300">{formatPLN(r.cash ?? 0)}</td>
                         <td className="py-1 text-right text-blue-300">{formatPLN(r.card ?? 0)}</td>
                         <td className="py-1 text-right text-purple-300">{formatPLN(r.blik ?? 0)}</td>
-                        <td className="py-1 text-right text-white font-medium">{formatPLN(r.total ?? 0)}</td>
+                        <td className="py-1 text-right text-white font-medium">{formatPLN(netRevenue(r))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -623,7 +623,7 @@ export default function AllTimeReport() {
             <Trophy className="text-yellow-400" size={22} />
             <div className="flex-1">
               <p className="text-xs text-slate-500">Rekord — najlepszy dzień w historii</p>
-              <p className="text-lg font-bold text-teal-300">{formatPLN(record.total ?? 0)} <span className="text-sm text-slate-400 font-normal">({record.date})</span></p>
+              <p className="text-lg font-bold text-teal-300">{formatPLN(netRevenue(record))} <span className="text-sm text-slate-400 font-normal">({record.date})</span></p>
               <div className="flex gap-4 text-xs mt-1">
                 <span className="text-teal-400">Got.: {formatPLN(record.cash ?? 0)}</span>
                 <span className="text-blue-400">Karta: {formatPLN(record.card ?? 0)}</span>
@@ -731,7 +731,7 @@ export default function AllTimeReport() {
               {sortedDesc.slice(0, 5).map((r, i) => (
                 <div key={r.date} className={`flex justify-between ${i === 0 ? 'text-sm' : ''}`}>
                   <span className={i === 0 ? 'text-yellow-400 font-semibold' : 'text-slate-500'}>{i === 0 && '🏆 '}{i + 1}. {r.date}</span>
-                  <span className="text-teal-300 font-semibold">{formatPLN(r.total ?? 0)}</span>
+                  <span className="text-teal-300 font-semibold">{formatPLN(netRevenue(r))}</span>
                 </div>
               ))}
             </div>
@@ -742,7 +742,7 @@ export default function AllTimeReport() {
               {sortedAsc.slice(0, 5).map((r, i) => (
                 <div key={r.date} className="flex justify-between">
                   <span className="text-slate-500">{i + 1}. {r.date}</span>
-                  <span className="text-orange-400 font-semibold">{formatPLN(r.total ?? 0)}</span>
+                  <span className="text-orange-400 font-semibold">{formatPLN(netRevenue(r))}</span>
                 </div>
               ))}
             </div>

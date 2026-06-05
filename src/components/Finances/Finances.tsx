@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Download, Check, Lock,
 import {
   getMonthlyRevenue, upsertDailyRevenue, deleteDailyRevenue, DailyRevenue, DENOMS, BASE_DENOMS,
   getMonthlyInvoices, addInvoice, updateInvoice, deleteInvoice, Invoice,
-  getTotalInvestments, getTotalRevenue,
+  getTotalInvestments, getTotalRevenue, netRevenue,
 } from '../../lib/database';
 import { getReservationsForDate, setReservationStatus, type Reservation } from '../../lib/supabase';
 import { exportMonthToExcel, exportOwnerToExcel } from '../../lib/excel';
@@ -1027,7 +1027,7 @@ export default function Finances() {
                         <td className="text-right py-2.5 text-teal-300 font-semibold">{formatPLN(r.do_sejfu ?? 0)}</td>
                         <td className="text-right py-2.5 text-slate-300">{formatPLN(r.card)}</td>
                         <td className="text-right py-2.5 text-slate-300">{formatPLN(r.blik)}</td>
-                        <td className="text-right py-2.5 text-teal-400 font-semibold">{formatPLN(r.total ?? 0)}</td>
+                        <td className="text-right py-2.5 text-teal-400 font-semibold">{formatPLN(netRevenue(r))}</td>
                         <td className="text-right py-2.5 text-yellow-400">{r.estimated_cars ?? 0}</td>
                         <td className="text-center py-2.5 text-base">
                           {r.weather === 'sunny' ? '☀️' : r.weather === 'cloudy' ? '🌤️' : r.weather === 'rainy' ? '🌧️' : r.weather === 'stormy' ? '⛈️' : ''}
