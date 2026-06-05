@@ -182,7 +182,7 @@ function RevenueForm({ date, initial, onSave, onClose }: RevenueFormProps) {
   const card_net  = form.card  * (1 - commissionRate / 100);
   const blik_net  = form.blik  * (1 - commissionRate / 100);
   const total     = cash + form.card + form.blik;
-  const cars      = Math.round(total / 20);
+  const cars      = Math.max(0, Math.round(do_sejfu / 20));
 
   const setQty     = (key: string) => (n: number) =>
     setForm(f => ({ ...f, [key]: Math.max(0, n) }));
@@ -762,7 +762,7 @@ export default function Finances() {
 
   useEffect(() => { load(); }, [load]);
 
-  const totalRevenue = revenues.reduce((s, r) => s + (r.total ?? 0), 0);
+  const totalRevenue = revenues.reduce((s, r) => s + (r.do_sejfu ?? 0) + (r.card ?? 0) + (r.blik ?? 0), 0);
   const totalOperationalCosts = invoices.filter(i => i.category !== 'Inwestycja').reduce((s, i) => s + i.amount, 0);
   const totalInvestmentCosts  = invoices.filter(i => i.category === 'Inwestycja').reduce((s, i) => s + i.amount, 0);
   const totalCosts = invoices.reduce((s, i) => s + i.amount, 0);
@@ -786,12 +786,32 @@ export default function Finances() {
   };
 
   const openRevModal = async (date: string) => {
-    const { getDailyRevenue } = await import('../../lib/database');
+    const { getDailyRevenue, getPreviousDailyRevenue } = await import('../../lib/database');
     const existing = await getDailyRevenue(date);
     // guard: edycja istniejącego = finances.edit, nowy = finances.add_income
     const needPerm = existing ? 'finances.edit' : 'finances.add_income';
     if (!perm.guard(needPerm, existing ? 'edycja wpisu dziennego' : 'dodanie wpisu dziennego')) return;
-    setRevModalInitial(existing);
+    if (existing) {
+      setRevModalInitial(existing);
+      setRevModalDate(date);
+      return;
+    }
+    // Nowy dzień: prefill saszetka + baza z bazy poprzedniego dnia
+    const prev = await getPreviousDailyRevenue(date);
+    if (prev) {
+      setRevModalInitial({
+        date,
+        qty_1: prev.base_qty_1 ?? 0, qty_2: prev.base_qty_2 ?? 0, qty_5: prev.base_qty_5 ?? 0,
+        qty_10: prev.base_qty_10 ?? 0, qty_20: prev.base_qty_20 ?? 0, qty_50: prev.base_qty_50 ?? 0,
+        qty_100: prev.base_qty_100 ?? 0, qty_200: prev.base_qty_200 ?? 0, qty_500: prev.base_qty_500 ?? 0,
+        base_qty_1: prev.base_qty_1 ?? 0, base_qty_2: prev.base_qty_2 ?? 0, base_qty_5: prev.base_qty_5 ?? 0,
+        base_qty_10: prev.base_qty_10 ?? 0, base_qty_20: prev.base_qty_20 ?? 0, base_qty_50: prev.base_qty_50 ?? 0,
+        base_qty_100: prev.base_qty_100 ?? 0, base_qty_200: prev.base_qty_200 ?? 0, base_qty_500: prev.base_qty_500 ?? 0,
+        card: 0, blik: 0, notes: '',
+      } as DailyRevenue);
+    } else {
+      setRevModalInitial(null);
+    }
     setRevModalDate(date);
   };
 

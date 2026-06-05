@@ -314,13 +314,23 @@ function computeTotals(r: DailyRevenue): DailyRevenue {
                    + (r.base_qty_10 ?? 0)*10 + (r.base_qty_20 ?? 0)*20 + (r.base_qty_50 ?? 0)*50
                    + (r.base_qty_100 ?? 0)*100 + (r.base_qty_200 ?? 0)*200 + (r.base_qty_500 ?? 0)*500;
   const do_sejfu = cash - base_total;
-  return { ...r, coins, banknotes, cash, total, estimated_cars: Math.round(total / 20), base_total, do_sejfu };
+  return { ...r, coins, banknotes, cash, total, estimated_cars: Math.max(0, Math.round(do_sejfu / 20)), base_total, do_sejfu };
 }
 
 export async function getDailyRevenue(date: string): Promise<DailyRevenue | null> {
   const database = await getDb();
   const rows = await database.select<DailyRevenue[]>(
     'SELECT * FROM daily_revenue WHERE date = $1',
+    [date]
+  );
+  if (rows.length === 0) return null;
+  return computeTotals(rows[0]);
+}
+
+export async function getPreviousDailyRevenue(date: string): Promise<DailyRevenue | null> {
+  const database = await getDb();
+  const rows = await database.select<DailyRevenue[]>(
+    'SELECT * FROM daily_revenue WHERE date < $1 ORDER BY date DESC LIMIT 1',
     [date]
   );
   if (rows.length === 0) return null;
@@ -419,7 +429,7 @@ export async function getTotalInvestments(): Promise<number> {
 export async function getTotalRevenue(): Promise<number> {
   const database = await getDb();
   const rows = await database.select<{ total: number }[]>(
-    `SELECT COALESCE(SUM(qty_1*1 + qty_2*2 + qty_5*5 + qty_10*10 + qty_20*20 + qty_50*50 + qty_100*100 + qty_200*200 + qty_500*500 + card + blik), 0) as total FROM daily_revenue`, []
+    `SELECT COALESCE(SUM(qty_1*1 + qty_2*2 + qty_5*5 + qty_10*10 + qty_20*20 + qty_50*50 + qty_100*100 + qty_200*200 + qty_500*500 + card + blik - base_qty_1*1 - base_qty_2*2 - base_qty_5*5 - base_qty_10*10 - base_qty_20*20 - base_qty_50*50 - base_qty_100*100 - base_qty_200*200 - base_qty_500*500), 0) as total FROM daily_revenue`, []
   );
   return rows[0]?.total ?? 0;
 }
